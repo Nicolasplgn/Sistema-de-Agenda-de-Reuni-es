@@ -1,0 +1,1825 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Sistema de Agenda - Salas de Reunião</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/axios/1.4.0/axios.min.js"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+  <link href="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.8/index.global.min.css" rel="stylesheet"/>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background-color: #000;
+      color: #fff;
+    }
+
+    .fullscreen-center {
+      background-color: #000;
+      color: white;
+      height: 100vh;
+      width: 100vw;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+
+    /* Logo no cabeçalho */
+    .header-logo {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-right: auto;
+    }
+    
+    .header-logo img {
+      height: 40px;
+    }
+
+    /* Header Styles */
+    header {
+      background-color: #000;
+      padding: 1rem 2rem;
+      border-bottom: 1px solid #ffc107;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    header h2 {
+      margin: 0;
+      color: #ffc107;
+      font-size: 1.5rem;
+    }
+
+    .user-info {
+      display: flex;
+      align-items: center;
+      gap: 15px;
+    }
+
+    .badge {
+      background: #ffc107;
+      color: #000;
+      padding: 5px 12px;
+      border-radius: 20px;
+      font-size: 12px;
+      font-weight: bold;
+    }
+
+    .badge.admin { 
+      background: #dc2626;
+      color: white;
+    }
+
+    header button {
+      background: #333;
+      color: #ffc107;
+      border: 1px solid #ffc107;
+      padding: 0.5rem 1rem;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: all 0.3s;
+      font-weight: bold;
+    }
+
+    header button:hover {
+      background: #ffc107;
+      color: #000;
+    }
+
+    /* Tabs */
+    .tabs {
+      display: flex;
+      gap: 10px;
+      margin: 1rem 2rem 0;
+      border-bottom: 1px solid #333;
+      padding-bottom: 10px;
+    }
+
+    .tab-button {
+      padding: 0.6rem 1.2rem;
+      background: #333;
+      color: #ffc107;
+      border: none;
+      border-radius: 6px 6px 0 0;
+      cursor: pointer;
+      transition: all 0.3s;
+      font-weight: bold;
+    }
+
+    .tab-button.active {
+      background: #ffc107;
+      color: #000;
+    }
+
+    /* Views */
+    #calendarView,
+    #salasView,
+    #relatorioView {
+      margin: 1rem 2rem;
+    }
+
+    #calendar {
+      background: rgb(80, 80, 80);
+      padding: 1rem;
+      border-radius: 10px;
+      border: 1px solid #ffffff;
+      max-width: 1000px;
+      margin: auto;
+      color: #333; /* Texto escuro para contraste */
+    }
+
+    /* Estilos para a aba de relatório - Versão Atualizada */
+.filtros-relatorio {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 15px;
+  margin-bottom: 20px;
+  padding: 20px;
+  background: #111;
+  border-radius: 10px;
+  border: 1px solid #ffc107;
+  box-shadow: 0 2px 10px rgba(255, 193, 7, 0.1);
+}
+
+/* Estilos para o Relatório */
+.filtros-relatorio {
+  background: #1a1a1a;
+  padding: 20px;
+  border-radius: 8px;
+  margin-bottom: 20px;
+  border: 1px solid #ffc107;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+  gap: 15px;
+  align-items: end;
+}
+
+.filtro-grid {
+  display: contents; /* Isso faz com que os filhos diretos participem do grid pai */
+}
+
+.button-group {
+  grid-column: span 2; /* Faz o grupo de botões ocupar 2 colunas */
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+  align-self: end;
+}
+
+.btn-load {
+  background: #333;
+  color: #ffc107;
+  border: 1px solid #ffc107;
+  padding: 8px 15px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.3s;
+}
+
+.btn-load:hover {
+  background: #ffc107;
+  color: #000;
+}
+
+.btn-excel {
+  background: #1d6f42;
+  color: white;
+  padding: 8px 15px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.3s;
+  border: none;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.btn-excel:hover {
+  background: #28a745;
+}
+
+.relatorio-container {
+  background: #1a1a1a;
+  border-radius: 8px;
+  padding: 20px;
+  border: 1px solid #ffc107;
+  min-height: 300px;
+}
+
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  color: #666;
+  padding: 40px;
+  text-align: center;
+}
+
+.empty-state i {
+  font-size: 40px;
+  margin-bottom: 15px;
+  color: #ffc107;
+}
+
+.empty-state p {
+  margin-top: 10px;
+  color: #aaa;
+}
+
+/* Tabela de resultados */
+.table-responsive {
+  overflow-x: auto;
+}
+
+.table-relatorio {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 15px;
+}
+
+.table-relatorio th {
+  background: #333;
+  color: #ffc107;
+  padding: 12px 15px;
+  text-align: left;
+  position: sticky;
+  top: 0;
+  border-bottom: 2px solid #ffc107;
+}
+
+.table-relatorio td {
+  padding: 10px 15px;
+  border-bottom: 1px solid #333;
+  color: #ddd;
+}
+
+.table-relatorio tr:nth-child(even) {
+  background: #222;
+}
+
+.table-relatorio tr:hover {
+  background: #2a2a2a;
+}
+
+/* Responsivo */
+@media (max-width: 768px) {
+  .filtro-grid {
+    grid-template-columns: 1fr;
+  }
+  
+  .button-group {
+    justify-content: stretch;
+  }
+  
+  .btn {
+    justify-content: center;
+  }
+}
+
+
+.filtros-relatorio .form-group {
+  margin-bottom: 0;
+}
+
+.filtros-relatorio label {
+  color: #ffc107;
+  font-size: 14px;
+  margin-bottom: 5px;
+}
+
+.filtros-relatorio input,
+.filtros-relatorio select {
+  background: #222;
+  border: 1px solid #444;
+  color: #fff;
+  padding: 8px 12px;
+}
+
+.filtros-relatorio input:focus,
+.filtros-relatorio select:focus {
+  border-color: #ffc107;
+  box-shadow: 0 0 0 2px rgba(255, 193, 7, 0.2);
+}
+
+.buttons-relatorio {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+}
+
+.participantes-container {
+    margin-top: 15px;
+    display: grid;
+    gap: 10px;
+    max-height: 200px;
+    overflow-y: auto;
+    padding: 10px;
+    background: #1a1a1a;
+    border-radius: 6px;
+    border: 1px solid #333;
+  }
+
+  .participante-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .participante-item label {
+    min-width: 120px;
+    color: #ffc107;
+    font-size: 14px;
+  }
+
+  .participante-item input {
+    flex: 1;
+    background: #222;
+    border: 1px solid #444;
+    color: white;
+    padding: 8px 12px;
+    border-radius: 4px;
+    font-size: 14px;
+  }
+
+  .participante-item input:focus {
+    border-color: #ffc107;
+    outline: none;
+  }    
+
+
+.btn-load {
+  background: #333;
+  color: #ffc107;
+  border: 1px solid #ffc107;
+  padding: 8px 15px;
+  font-size: 14px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.3s;
+  height: 38px;
+}
+
+.btn-load:hover {
+  background: #ffc107;
+  color: #000;
+}
+
+.btn-excel {
+  background: #1d6f42;
+  color: white;
+  padding: 8px 15px;
+  font-size: 14px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.3s;
+  border: none;
+  height: 38px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.modal-content {
+  max-height: 90vh;
+  overflow-y: auto;
+}
+
+.btn-excel:hover {
+  background: #2e8b57;
+}
+
+.btn-excel::before {
+  content: "📊";
+}
+
+.relatorio-container {
+  background: #111;
+  border-radius: 10px;
+  border: 1px solid #ffc107;
+  padding: 15px;
+  margin-top: 20px;
+  max-height: 500px;
+  overflow-y: auto;
+}
+
+.tabela-relatorio {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.tabela-relatorio th {
+  background: #333;
+  color: #ffc107;
+  padding: 12px 15px;
+  text-align: left;
+  position: sticky;
+  top: 0;
+  border-bottom: 2px solid #ffc107;
+}
+
+.tabela-relatorio td {
+  padding: 10px 15px;
+  border-bottom: 1px solid #333;
+  color: #ddd;
+}
+
+.tabela-relatorio tr:nth-child(even) {
+  background: #1a1a1a;
+}
+
+.tabela-relatorio tr:hover {
+  background: #222;
+}
+
+/* Barra de rolagem personalizada */
+.relatorio-container::-webkit-scrollbar {
+  width: 8px;
+}
+
+.relatorio-container::-webkit-scrollbar-track {
+  background: #222;
+  border-radius: 10px;
+}
+
+.relatorio-container::-webkit-scrollbar-thumb {
+  background: #ffc107;
+  border-radius: 10px;
+}
+
+.relatorio-container::-webkit-scrollbar-thumb:hover {
+  background: #ffd700;
+}
+
+/* Mensagem quando não há dados */
+.empty-relatorio {
+  text-align: center;
+  padding: 30px;
+  color: #777;
+  font-style: italic;
+}
+
+/* Responsividade */
+@media (max-width: 768px) {
+  .filtros-relatorio {
+    grid-template-columns: 1fr;
+  }
+  
+  .buttons-relatorio {
+    grid-column: 1 / -1;
+    justify-content: flex-end;
+  }
+  
+  .tabela-relatorio {
+    display: block;
+    overflow-x: auto;
+  }
+}
+
+
+    
+    .fc-header-toolbar {
+      color: #333;
+    }
+    
+    .fc-button {
+      background-color: #fff !important;
+      color: #333 !important;
+      border: 1px solid #ffffff !important;
+    }
+    
+    .fc-button:hover {
+      background-color: #ffc107 !important;
+      color: #000 !important;
+      border-color: #ffc107 !important;
+    }
+    
+    .fc-button-active {
+      background-color: #ffc107 !important;
+      color: #000 !important;
+      border-color: #ffc107 !important;
+    }
+    
+    .fc-daygrid-day-number, .fc-col-header-cell-cushion {
+      color: #333;
+    }
+    
+    .fc-daygrid-day.fc-day-today {
+      background-color: rgba(255, 193, 7, 0.3) !important;
+    }
+    
+    .fc-event {
+      background-color: #ffc107;
+      color: #000;
+      border-color: #ffc107;
+    }
+    
+    .fc-event:hover {
+      background-color: #ffd700;
+    }
+    
+    .fc-daygrid-event-dot {
+      border-color: #000 !important;
+    }
+
+    /* Login Screen */
+    .login-container {
+      max-width: 400px;
+      margin: 100px auto;
+      background: #111;
+      padding: 30px;
+      border-radius: 10px;
+      box-shadow: 0 0 15px rgba(243, 227, 2, 0.5);
+    }
+
+    .form-group {
+      margin-bottom: 20px;
+    }
+
+    label {
+      display: block;
+      margin-bottom: 5px;
+      font-weight: bold;
+      color: #ffc107;
+    }
+
+    input, select, textarea {
+      width: 100%;
+      padding: 10px;
+      background: #333;
+      color: white;
+      border: 1px solid #ffc107;
+      border-radius: 6px;
+      font-size: 14px;
+    }
+
+    input:focus, select:focus, textarea:focus {
+      outline: none;
+      border-color: #ffc107;
+      box-shadow: 0 0 5px rgba(255, 193, 7, 0.5);
+    }
+
+    .btn {
+      padding: 10px 20px;
+      border: none;
+      border-radius: 6px;
+      font-size: 14px;
+      font-weight: bold;
+      cursor: pointer;
+      transition: all 0.3s;
+    }
+
+    .btn-primary {
+      background: #ffc107;
+      color: #000;
+    }
+
+    .btn-primary:hover { 
+      background: #ffd700;
+      box-shadow: 0 0 10px rgba(255, 215, 0, 0.5);
+    }
+
+    .error {
+      color: #ef4444;
+      font-size: 14px;
+      margin-top: 5px;
+    }
+
+    /* Rooms View */
+    .rooms-container {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+      margin-top: 20px;
+    }
+
+    .room-card {
+      background: #111;
+      border-radius: 10px;
+      border: 1px solid #ffc107;
+      overflow: hidden;
+    }
+
+    .room-header {
+      background: #222;
+      padding: 15px;
+      border-bottom: 1px solid #ffc107;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .room-title {
+      font-size: 18px;
+      font-weight: 600;
+      color: #ffc107;
+    }
+
+    .room-content { 
+      padding: 15px; 
+    }
+
+    .meeting-item {
+      background: #222;
+      border: 1px solid #ffc107;
+      border-radius: 8px;
+      padding: 15px;
+      margin-bottom: 10px;
+      position: relative;
+    }
+
+    .meeting-time {
+      font-weight: 600;
+      color: #ffc107;
+      margin-bottom: 5px;
+    }
+
+    .meeting-subject {
+      font-size: 16px;
+      margin-bottom: 5px;
+      font-weight: 500;
+      color: #fff;
+    }
+
+    .meeting-organizer, .meeting-participants {
+      font-size: 14px;
+      color: #aaa;
+      margin-bottom: 5px;
+    }
+    
+
+    /* Estados de carregamento e erro */
+.loading-state, .error-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 40px;
+  text-align: center;
+  color: #aaa;
+}
+
+.loading-state i {
+  font-size: 40px;
+  margin-bottom: 15px;
+  color: #ffc107;
+}
+
+.error-state i {
+  font-size: 40px;
+  margin-bottom: 15px;
+  color: #dc3545;
+}
+
+.error-state small {
+  display: block;
+  margin-top: 10px;
+  color: #777;
+  font-size: 12px;
+}
+
+/* Contador de resultados */
+.result-count {
+  background: #333;
+  color: #ffc107;
+  padding: 8px 15px;
+  border-radius: 4px;
+  margin-bottom: 15px;
+  font-size: 14px;
+  display: inline-block;
+}
+
+/* Animação de spinner */
+.fa-spin {
+  animation: fa-spin 2s infinite linear;
+}
+
+@keyframes fa-spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(359deg); }
+}
+    
+
+
+
+    .meeting-actions {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      display: flex;
+      gap: 5px;
+    }
+
+    .btn-small {
+      padding: 5px 10px;
+      font-size: 12px;
+    }
+
+    .btn-danger {
+      background: #ef4444;
+      color: white;
+    }
+
+    .btn-danger:hover { 
+      background: #dc2626;
+      box-shadow: 0 0 5px rgba(220, 38, 38, 0.5);
+    }
+
+    /* Modal */
+    .modal {
+      display: none;
+      position: fixed;
+      z-index: 1000;
+      left: 0;
+      top: 0;
+      width: 100%;
+      height: 100%;
+      background-color: rgba(0,0,0,0.8);
+    }
+
+    .modal-content {
+        max-height: 90vh;
+  overflow-y: auto;
+      background-color: #111;
+      margin: 5% auto;
+      padding: 30px;
+      border-radius: 10px;
+      border: 1px solid #ffc107;
+       width: 95%;
+      max-width: 500px;
+      color: white;
+    }
+
+    .modal-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 20px;
+      border-bottom: 1px solid #ffc107;
+      padding-bottom: 10px;
+    }
+
+    .modal-header h2 {
+      color: #ffc107;
+    }
+
+    .close {
+      font-size: 28px;
+      font-weight: bold;
+      cursor: pointer;
+      color: #ffc107;
+    }
+
+    .form-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 15px;
+    }
+
+    .empty-state {
+      text-align: center;
+      padding: 40px;
+      color: #aaa;
+    }
+
+    /* Estilos para a aba de relatório */
+    .filtros-relatorio {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+      gap: 15px;
+      margin-bottom: 20px;
+      padding: 15px;
+      background: #222;
+      border-radius: 8px;
+      border: 1px solid #ffc107;
+    }
+
+    .tabela-relatorio {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 20px;
+    }
+
+    .tabela-relatorio th, .tabela-relatorio td {
+      padding: 12px;
+      text-align: left;
+      border-bottom: 1px solid #ffc107;
+    }
+
+    .tabela-relatorio th {
+      background-color: #333;
+      color: #ffc107;
+    }
+
+    .tabela-relatorio tr:nth-child(even) {
+      background-color: #222;
+    }
+
+    .tabela-relatorio tr:hover {
+      background-color: #333;
+    }
+
+    .relatorio-container {
+      max-height: 500px;
+      overflow-y: auto;
+      margin-top: 20px;
+    }
+
+
+    /* Estilos para o FullCalendar */
+    .fc-header-toolbar {
+      color: #ffc107;
+    }
+    
+    .fc-button {
+      background-color: #333 !important;
+      color: #ffc107 !important;
+      border: 1px solid #ffc107 !important;
+    }
+    
+    .fc-button:hover {
+      background-color: #ffc107 !important;
+      color: #000 !important;
+    }
+    
+    .fc-button-active {
+      background-color: #ffc107 !important;
+      color: #000 !important;
+    }
+    
+    .fc-daygrid-day-number, .fc-col-header-cell-cushion {
+      color: #ffc107;
+    }
+    
+    .fc-daygrid-day.fc-day-today {
+      background-color: rgba(255, 193, 7, 0.1) !important;
+    }
+
+    @media (max-width: 768px) {
+      .rooms-container { 
+        grid-template-columns: 1fr; 
+      }
+      
+      .form-row { 
+        grid-template-columns: 1fr; 
+      }
+
+      .filtros-relatorio {
+        grid-template-columns: 1fr;
+      }
+      
+      header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 10px;
+      }
+      
+      .header-logo {
+        margin-bottom: 10px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <!-- Tela de Login -->
+<div id="loginScreen" class="fullscreen-center">
+  <div style="
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 25px;
+    background-color: #000000;
+    padding: 40px;
+    border-radius: 12px;
+    box-shadow: 0 0 15px rgba(243, 227, 2, 0.863);
+    max-width: 350px;
+    width: 100%;
+  ">
+    <!-- Logo -->
+    <div style="display: flex; align-items: center; gap: 10px;">
+      <img src="logo.png" alt="Logo HDL" style="height: 45px;" />
+    </div>
+
+    <!-- Título -->
+    <div style="text-align: center; margin-top: 10px;">
+  <h2 style="font-size: 22px; font-weight: bold; margin: 0; color: #ffc107;">AGENDA</h2>
+  <h2 style="font-size: 22px; font-weight: bold; margin: 0; color: #ffc107;">SALAS DE REUNIÃO</h2>
+</div>
+
+    <!-- Formulário -->
+    <div id="loginForm" style="width: 100%;">
+      <div class="form-group" style="margin-bottom: 20px;">
+        <label for="loginUsername" style="font-weight: bold; display: block; margin-bottom: 5px; color: #ffc107;">LOGIN</label>
+        <input type="text" id="loginUsername" style="width: 100%; padding: 10px; background: #333; color: white; border: 1px solid #ffc107; border-radius: 6px;" />
+      </div>
+      <div class="form-group" style="margin-bottom: 25px;">
+        <label for="loginPassword" style="font-weight: bold; display: block; margin-bottom: 5px; color: #ffc107;">SENHA</label>
+        <input type="password" id="loginPassword" style="width: 100%; padding: 10px; background: #333; color: white; border: 1px solid #ffc107; border-radius: 6px;" />
+      </div>
+      <button onclick="login()" style="width: 100%; padding: 10px; background: #ffc107; color: black; font-weight: bold; border: none; border-radius: 6px; cursor: pointer; transition: all 0.3s;">Entrar</button>
+      <div id="loginError" class="error" style="margin-top: 10px; color: #ef4444;"></div>
+    </div>
+  </div>
+</div>
+
+  <!-- Tela Principal -->
+  <div id="mainScreen" style="display: none;">
+    <header>
+      <div class="header-logo">
+        <img src="logo.png" alt="Logo HDL" />
+        <h2>Sistema de Agenda - Salas de Reunião</h2>
+      </div>
+      <div class="user-info">
+        <span id="userName"></span>
+        <span id="userType" class="badge"></span>
+        <button onclick="logout()">Sair</button>
+      </div>
+    </header>
+
+   <div class="tabs">
+  <button class="tab-button" id="tabSalas" onclick="showTab('salas')">Salas</button>
+  <button class="tab-button active" id="tabCalendario" onclick="showTab('calendario')">Calendário</button>
+  <button class="tab-button" id="tabRelatorio" onclick="showTab('relatorio')" style="display: none;">Relatório</button>
+</div>
+    <div id="salasView" style="display: none;">
+      <div class="rooms-container">
+        <div class="room-card">
+          <div class="room-header">
+            <h2 class="room-title">Sala de Baixo</h2>
+            <button class="btn btn-primary" onclick="openMeetingModal('baixo')">+ Nova Reunião</button>
+          </div>
+          <div class="room-content">
+            <div id="meetingsBaixo" class="meetings-list"></div>
+          </div>
+        </div>
+        <div class="room-card">
+          <div class="room-header">
+            <h2 class="room-title">Sala de Cima</h2>
+            <button class="btn btn-primary" onclick="openMeetingModal('cima')">+ Nova Reunião</button>
+          </div>
+          <div class="room-content">
+            <div id="meetingsCima" class="meetings-list"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="calendarView">
+      <div id="calendar"></div>
+    </div>
+<div id="relatorioView" style="display: none;">
+  <div class="filtros-relatorio">
+    <div class="form-group">
+      <label for="dataInicio">Data Início:</label>
+      <input type="date" id="dataInicio" class="form-control">
+    </div>
+    
+    <div class="form-group">
+      <label for="dataFim">Data Fim:</label>
+      <input type="date" id="dataFim" class="form-control">
+    </div>
+    
+    <div class="form-group">
+      <label for="salaRelatorio">Sala:</label>
+      <select id="salaRelatorio" class="form-control">
+        <option value="todas">Todas as Salas</option>
+        <option value="baixo">Sala de Baixo</option>
+        <option value="cima">Sala de Cima</option>
+      </select>
+    </div>
+    
+    <div class="button-group">
+      <button class="btn-load" onclick="carregarDadosRelatorio()">
+        <i class="fas fa-sync-alt"></i> Carregar
+      </button>
+      <button class="btn-excel" onclick="exportarParaExcel()">
+        <i class="fas fa-file-excel"></i> Exportar
+      </button>
+    </div>
+  </div>
+  
+  <div id="resultadoRelatorio" class="relatorio-container">
+    <div class="empty-state">
+      <i class="fas fa-table"></i>
+      <p>Nenhum dado carregado. Aplique os filtros e clique em "Carregar"</p>
+    </div>
+  </div>
+</div>
+
+  <!-- Modal de Reunião -->
+ <div id="meetingModal" class="modal">
+  <div class="modal-content">
+    <div class="modal-header">
+      <h2 id="modalTitle">Nova Reunião</h2>
+      <span class="close" onclick="closeMeetingModal()">&times;</span>
+    </div>
+    <div id="meetingForm">
+      <div class="form-group">
+        <label for="meetingRoom">Sala</label>
+        <select id="meetingRoom" disabled>
+          <option value="baixo">Sala de Baixo</option>
+          <option value="cima">Sala de Cima</option>
+        </select>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label for="meetingDate">Data</label>
+          <input type="date" id="meetingDate" required />
+        </div>
+        <div class="form-group">
+          <label for="meetingParticipants">Número de Participantes *</label>
+          <input type="number" id="meetingParticipants" min="1" 
+                 onchange="gerarCamposParticipantes()" placeholder="Quantidade de pessoas" required />
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label for="meetingStartTime">Início</label>
+          <input type="time" id="meetingStartTime" required />
+        </div>
+        <div class="form-group">
+          <label for="meetingEndTime">Fim</label>
+          <input type="time" id="meetingEndTime" required />
+        </div>
+      </div>
+      
+      <!-- Container para os campos dinâmicos de participantes -->
+      <div id="participantesContainer" class="participantes-container">
+        <!-- Campos serão gerados automaticamente aqui via JavaScript -->
+      </div>
+      
+      <div class="form-group">
+        <label for="meetingSubject">Assunto da Reunião *</label>
+        <textarea id="meetingSubject" placeholder="Descreva o que será tratado na reunião" rows="3" required></textarea>
+      </div>
+      
+      <div style="display: flex; gap: 10px; margin-top: 20px;">
+        <button class="btn btn-primary" onclick="saveMeeting()">Salvar Reunião</button>
+        <button class="btn" onclick="closeMeetingModal()">Cancelar</button>
+      </div>
+      <div id="meetingError" class="error" style="margin-top: 10px;"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+  // Fechar modal ao clicar fora
+  window.addEventListener('click', function(event) {
+    const modal = document.getElementById('meetingModal');
+    if (event.target === modal) {
+      closeMeetingModal();
+    }
+  });
+</script>
+
+  <script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.8/index.global.min.js"></script>
+  <script>
+    // --- Configuração da API ---
+    const api = axios.create({ baseURL: '/api' });
+    let currentUser = null;
+    let currentMeetingId = null;
+    let currentRoom = null;
+    let calendar = null;
+
+    api.interceptors.request.use(config => {
+      const token = localStorage.getItem('token');
+      if (token) config.headers.Authorization = `Bearer ${token}`;
+      return config;
+    });
+
+    // --- Autenticação ---
+    window.addEventListener('load', () => {
+      const token = localStorage.getItem('token');
+      if (token) verifyToken();
+    });
+
+    async function login() {
+      const username = document.getElementById('loginUsername').value;
+      const password = document.getElementById('loginPassword').value;
+      const errorDiv = document.getElementById('loginError');
+      
+      try {
+        const response = await api.post('/login', { username, password });
+        localStorage.setItem('token', response.data.token);
+        currentUser = response.data.user;
+        showMainScreen();
+      } catch (error) {
+        errorDiv.textContent = error.response?.data?.error || 'Erro ao fazer login';
+      }
+    }
+
+    async function verifyToken() {
+      try {
+        const response = await api.get('/verify');
+        currentUser = response.data.user;
+        showMainScreen();
+      } catch {
+        logout();
+      }
+    }
+
+ function logout() {
+  if (!confirm('Tem certeza que deseja sair do sistema?')) {
+    return;
+  }
+  
+  // Destruir o calendário se existir
+  if (calendar) {
+    calendar.destroy();
+    calendar = null;
+  }
+  
+  localStorage.removeItem('token');
+  currentUser = null;
+
+  const loginScreen = document.getElementById('loginScreen');
+  loginScreen.style.display = 'flex';
+  loginScreen.classList.add('fullscreen-center');
+
+  document.getElementById('mainScreen').style.display = 'none';
+}
+
+ function showMainScreen() {
+  document.getElementById('loginScreen').style.display = 'none';
+  document.getElementById('mainScreen').style.display = 'block';
+  
+  // Atualiza as informações do usuário
+  document.getElementById('userName').textContent = currentUser.name;
+  
+  const userTypeSpan = document.getElementById('userType');
+  userTypeSpan.textContent = currentUser.user_type === 'admin' ? 'ADMIN' : 'USUÁRIO';
+  userTypeSpan.className = `badge ${currentUser.user_type === 'admin' ? 'admin' : ''}`;
+  
+  // Controle da aba de relatório
+  const relatorioTab = document.getElementById('tabRelatorio');
+  
+  if (currentUser.user_type === 'admin' && !relatorioTab) {
+    const tabsDiv = document.querySelector('.tabs');
+    const newRelatorioTab = document.createElement('button');
+    newRelatorioTab.className = 'tab-button';
+    newRelatorioTab.id = 'tabRelatorio';
+    newRelatorioTab.textContent = 'Relatório';
+    newRelatorioTab.onclick = () => showTab('relatorio');
+    tabsDiv.appendChild(newRelatorioTab);
+  }
+  else if (relatorioTab) {
+    relatorioTab.style.display = currentUser.user_type === 'admin' ? 'block' : 'none';
+  }
+  
+  // Recarregar o calendário do zero
+  loadCalendar();
+  loadMeetings();
+}
+
+    // --- Abas e Visualização ---
+    function showTab(tab) {
+      document.getElementById('salasView').style.display = tab === 'salas' ? 'block' : 'none';
+      document.getElementById('calendarView').style.display = tab === 'calendario' ? 'block' : 'none';
+      document.getElementById('relatorioView').style.display = tab === 'relatorio' ? 'block' : 'none';
+      
+      document.getElementById('tabSalas').classList.toggle('active', tab === 'salas');
+      document.getElementById('tabCalendario').classList.toggle('active', tab === 'calendario');
+      
+      const tabRelatorio = document.getElementById('tabRelatorio');
+      if (tabRelatorio) {
+        tabRelatorio.classList.toggle('active', tab === 'relatorio');
+      }
+      
+      if (tab === 'calendario' && calendar) {
+  setTimeout(() => calendar.render(), 100);
+}
+    }
+
+    function gerarCamposParticipantes() {
+  const numParticipantes = parseInt(document.getElementById('meetingParticipants').value);
+  const container = document.getElementById('participantesContainer');
+  
+  // Limpa campos anteriores
+  container.innerHTML = '';
+  
+  // Validação básica
+  if (isNaN(numParticipantes) || numParticipantes < 1) {
+    return;
+  }
+  
+  // Cria campos para cada participante
+  for (let i = 1; i <= numParticipantes; i++) {
+    const div = document.createElement('div');
+    div.className = 'participante-item';
+    div.innerHTML = `
+      <label>Participante ${i}:</label>
+      <input type="text" id="participante_${i}" 
+             placeholder="Nome completo" required />
+    `;
+    container.appendChild(div);
+  }
+}
+
+    // --- Calendário ---
+   function loadCalendar() {
+      if (calendar) {
+        calendar.destroy();
+      }
+      
+      // Cria o elemento do calendário
+      const calendarContainer = document.getElementById('calendar');
+      calendarContainer.innerHTML = ''; // Limpa o conteúdo anterior
+      
+      // Inicializa o calendário
+    const calendarEl = document.getElementById('calendar');
+      
+      calendar = new FullCalendar.Calendar(calendarEl, {
+        initialView: 'dayGridMonth',
+        locale: 'pt-br',
+        headerToolbar: {
+          left: 'prev,next today',
+          center: 'title',
+          right: 'dayGridMonth,timeGridWeek,listWeek'
+        },
+        buttonText: {
+          today: 'Hoje',
+          prev: 'Anterior',
+          next: 'Próximo',
+          month: 'Mês',
+          week: 'Semana',
+          list: 'Lista'
+        },
+        views: {
+          dayGridMonth: {
+            buttonText: 'Mês'
+          },
+          timeGridWeek: {
+            buttonText: 'Semana'
+          },
+          listWeek: {
+            buttonText: 'Lista'
+          }
+        },
+        events: async (fetchInfo, successCallback, failureCallback) => {
+          try {
+            const res = await api.get('/meetings');
+            const eventos = res.data.map(m => {
+              const podeVerDetalhes = currentUser.user_type === 'admin' || m.organizer_id === currentUser.id;
+              return {
+                id: m.id,
+                title: podeVerDetalhes ? m.subject : 'Reservado',
+                start: `${m.date}T${m.start_time}`,
+                end: `${m.date}T${m.end_time}`,
+                extendedProps: {
+                  sala: m.room_location,
+                  participantes: m.participants,
+                  organizador: m.organizer_name,
+                  podeEditar: podeVerDetalhes,
+                  assuntoReal: m.subject
+                },
+                color: podeVerDetalhes ? '#ffc107' : '#6b7280',
+                textColor: podeVerDetalhes ? '#000' : '#fff'
+              };
+            });
+            successCallback(eventos);
+          } catch (err) {
+            failureCallback(err);
+          }
+        },
+        eventClick(info) {
+          const props = info.event.extendedProps;
+          let msg = `Sala: ${props.sala}\nOrganizador: ${props.organizador}\nParticipantes: ${props.participantes}`;
+          if (props.podeEditar) {
+            msg += `\nAssunto: ${props.assuntoReal}`;
+          } else {
+            msg += `\nAssunto: Reservado`;
+          }
+          alert(msg);
+        }
+      });
+
+      calendar.render();
+    } 
+
+async function exportarParaExcel() {
+  try {
+    const token = localStorage.getItem('token');
+    if (!token) {
+      alert('Sessão expirada. Por favor, faça login novamente.');
+      logout();
+      return;
+    }
+
+    const dataInicio = document.getElementById('dataInicio').value;
+    const dataFim = document.getElementById('dataFim').value;
+    const sala = document.getElementById('salaRelatorio').value;
+
+    // Construir URL com parâmetros
+    const params = new URLSearchParams();
+    if (dataInicio) params.append('dataInicio', dataInicio);
+    if (dataFim) params.append('dataFim', dataFim);
+    if (sala && sala !== 'todas') params.append('sala', sala);
+
+    // Criar link temporário para download
+    const link = document.createElement('a');
+    link.href = `/api/meetings/exportar?${params.toString()}`;
+    link.setAttribute('download', 'relatorio_reunioes.csv');
+    
+    // Adicionar cabeçalho de autorização
+    fetch(link.href, {
+      headers: {
+        'Authorization': `Bearer ${token}`
+      }
+    })
+    .then(response => {
+      if (!response.ok) throw new Error('Erro ao exportar');
+      return response.blob();
+    })
+    .then(blob => {
+      const url = window.URL.createObjectURL(blob);
+      link.href = url;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+    })
+    .catch(error => {
+      console.error('Erro ao exportar:', error);
+      alert('Erro ao exportar relatório: ' + error.message);
+    });
+
+  } catch (error) {
+    console.error('Erro ao exportar:', error);
+    alert('Erro ao exportar relatório');
+  }
+}
+
+  // Cria o conteúdo do arquivo Excel
+  let csvContent = "data:text/csv;charset=utf-8,";
+  
+  // Cabeçalhos
+  const headers = [];
+  tabela.querySelectorAll('th').forEach(th => {
+    headers.push(th.textContent);
+  });
+  csvContent += headers.join(";") + "\r\n";
+  
+  // Dados
+  tabela.querySelectorAll('tbody tr').forEach(row => {
+    const rowData = [];
+    row.querySelectorAll('td').forEach(cell => {
+      rowData.push(cell.textContent);
+    });
+    csvContent += rowData.join(";") + "\r\n";
+  });
+  
+  // Cria o link de download
+  const encodedUri = encodeURI(csvContent);
+  const link = document.createElement("a");
+  link.setAttribute("href", encodedUri);
+  link.setAttribute("download", "relatorio_reunioes.csv");
+  document.body.appendChild(link);
+  
+  // Dispara o download
+  link.click();
+  
+  // Remove o link
+  document.body.removeChild(link);
+
+
+
+    // --- Reuniões ---
+    async function loadMeetings() {
+      try {
+        const [baixo, cima] = await Promise.all([
+          api.get('/meetings?room_location=baixo'),
+          api.get('/meetings?room_location=cima')
+        ]);
+        renderMeetings('baixo', baixo.data);
+        renderMeetings('cima', cima.data);
+      } catch (err) {
+        console.error('Erro ao carregar reuniões', err);
+      }
+    }
+
+    function renderMeetings(room, meetings) {
+  const container = document.getElementById(`meetings${room.charAt(0).toUpperCase() + room.slice(1)}`);
+  
+  if (!meetings.length) {
+    container.innerHTML = '<div class="empty-state">Nenhuma reunião agendada</div>';
+    return;
+  }
+  
+  container.innerHTML = meetings.map(meeting => {
+    const isOwner = canEditMeeting(meeting);
+    const participantesText = meeting.participants_names 
+      ? `Participantes: ${meeting.participants_names}`
+      : `${meeting.participants} participante${meeting.participants !== 1 ? 's' : ''}`;
+    
+    return `
+      <div class="meeting-item">
+        <div class="meeting-time">${formatDate(meeting.date)} - ${meeting.start_time} às ${meeting.end_time}</div>
+        <div class="meeting-subject">${isOwner ? meeting.subject : '<i>Assunto reservado</i>'}</div>
+        <div class="meeting-organizer">Organizador: ${meeting.organizer_name}</div>
+        <div class="meeting-participants">${participantesText}</div>
+        ${isOwner ? `
+          <div class="meeting-actions">
+            <button class="btn btn-primary btn-small" onclick="editMeeting(${meeting.id})">Editar</button>
+            <button class="btn btn-danger btn-small" onclick="deleteMeeting(${meeting.id})">Excluir</button>
+          </div>
+        ` : ''}
+      </div>
+    `;
+  }).join('');
+}
+
+    function canEditMeeting(meeting) {
+      return currentUser.user_type === 'admin' || meeting.organizer_id === currentUser.id;
+    }
+
+    function formatDate(dateStr) {
+      const [y, m, d] = dateStr.split('-');
+      return `${d}/${m}/${y}`;
+    }
+
+    // --- Relatório ---
+    async function carregarDadosRelatorio() {
+  try {
+    // Mostrar estado de carregamento
+    const resultadoDiv = document.getElementById('resultadoRelatorio');
+    resultadoDiv.innerHTML = `
+      <div class="loading-state">
+        <i class="fas fa-spinner fa-spin"></i>
+        <p>Carregando dados...</p>
+      </div>
+    `;
+
+    // Obter parâmetros dos filtros
+    const params = {
+      dataInicio: document.getElementById('dataInicio').value,
+      dataFim: document.getElementById('dataFim').value,
+      sala: document.getElementById('salaRelatorio').value
+    };
+
+    // Fazer requisição com os filtros
+    const response = await api.get('/meetings/historico', { params });
+    const meetings = response.data;
+
+    // Limpar container
+    resultadoDiv.innerHTML = '';
+
+    if (!meetings || meetings.length === 0) {
+      resultadoDiv.innerHTML = `
+        <div class="empty-state">
+          <i class="fas fa-table"></i>
+          <p>Nenhuma reunião encontrada com os filtros selecionados</p>
+        </div>
+      `;
+      return;
+    }
+
+    // Criar tabela responsiva
+    const tableContainer = document.createElement('div');
+    tableContainer.className = 'table-responsive';
+
+    const tabela = document.createElement('table');
+    tabela.className = 'table-relatorio';
+
+    // Cabeçalho da tabela
+    const thead = document.createElement('thead');
+    thead.innerHTML = `
+      <tr>
+        <th>Data</th>
+        <th>Horário</th>
+        <th>Sala</th>
+        <th>Assunto</th>
+        <th>Organizador</th>
+        <th>Participantes</th>
+      </tr>
+    `;
+    tabela.appendChild(thead);
+
+    // Corpo da tabela
+    const tbody = document.createElement('tbody');
+    meetings.forEach(meeting => {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td>${formatDate(meeting.date)}</td>
+        <td>${meeting.start_time} - ${meeting.end_time}</td>
+        <td>${meeting.room_location === 'baixo' ? 'Sala de Baixo' : 'Sala de Cima'}</td>
+        <td>${meeting.subject}</td>
+        <td>${meeting.organizer_name}</td>
+        <td>${meeting.participants}</td>
+      `;
+      tbody.appendChild(tr);
+    });
+
+    tabela.appendChild(tbody);
+    tableContainer.appendChild(tabela);
+    resultadoDiv.appendChild(tableContainer);
+
+    // Adicionar contagem de resultados
+    const countDiv = document.createElement('div');
+    countDiv.className = 'result-count';
+    countDiv.textContent = `Total de ${meetings.length} reuniões encontradas`;
+    resultadoDiv.prepend(countDiv);
+
+  } catch (error) {
+    console.error('Erro ao carregar relatório:', error);
+    document.getElementById('resultadoRelatorio').innerHTML = `
+      <div class="error-state">
+        <i class="fas fa-exclamation-triangle"></i>
+        <p>Erro ao carregar relatório. Tente novamente.</p>
+        ${error.response?.data?.error ? `<small>${error.response.data.error}</small>` : ''}
+      </div>
+    `;
+  }
+}
+
+// Função auxiliar para formatar data (dd/mm/aaaa)
+function formatDate(dateString) {
+  if (!dateString) return '';
+  const [year, month, day] = dateString.split('-');
+  return `${day}/${month}/${year}`;
+}
+
+    async function gerarRelatorio() {
+      const dataInicio = document.getElementById('dataInicio').value;
+      const dataFim = document.getElementById('dataFim').value;
+      const sala = document.getElementById('salaRelatorio').value;
+      
+      try {
+        let url = '/meetings/historico?';
+        if (dataInicio) url += `dataInicio=${dataInicio}&`;
+        if (dataFim) url += `dataFim=${dataFim}&`;
+        if (sala !== 'todas') url += `sala=${sala}`;
+        
+        const response = await api.get(url);
+        const meetings = response.data;
+        
+        const resultadoDiv = document.getElementById('resultadoRelatorio');
+        resultadoDiv.innerHTML = '';
+        
+        if (meetings.length === 0) {
+          resultadoDiv.innerHTML = '<p>Nenhuma reunião encontrada com os filtros selecionados.</p>';
+          return;
+        }
+        
+        const tabela = document.createElement('table');
+        tabela.className = 'tabela-relatorio';
+        
+        // Cabeçalho da tabela
+        const thead = document.createElement('thead');
+        thead.innerHTML = `
+          <tr>
+            <th>Data</th>
+            <th>Horário</th>
+            <th>Sala</th>
+            <th>Assunto</th>
+            <th>Organizador</th>
+            <th>Participantes</th>
+          </tr>
+        `;
+        tabela.appendChild(thead);
+        
+        // Corpo da tabela
+        const tbody = document.createElement('tbody');
+        meetings.forEach(meeting => {
+          const tr = document.createElement('tr');
+          tr.innerHTML = `
+            <td>${formatDate(meeting.date)}</td>
+            <td>${meeting.start_time} - ${meeting.end_time}</td>
+            <td>${meeting.room_location === 'baixo' ? 'Sala de Baixo' : 'Sala de Cima'}</td>
+            <td>${meeting.subject}</td>
+            <td>${meeting.organizer_name}</td>
+            <td>${meeting.participants}</td>
+          `;
+          tbody.appendChild(tr);
+        });
+        
+        tabela.appendChild(tbody);
+        resultadoDiv.appendChild(tabela);
+        
+      } catch (error) {
+        console.error('Erro ao gerar relatório:', error);
+        document.getElementById('resultadoRelatorio').innerHTML = 
+          '<p class="error">Erro ao gerar relatório. Verifique os filtros e tente novamente.</p>';
+      }
+    }
+
+    function openMeetingModal(room) {
+  currentRoom = room;
+  currentMeetingId = null;
+  document.getElementById('modalTitle').textContent = 'Nova Reunião';
+  document.getElementById('meetingRoom').value = room;
+  document.getElementById('meetingModal').style.display = 'block';
+
+  // Resetar formulário completamente
+  const hoje = new Date();
+  const dataHoje = hoje.toISOString().split('T')[0];
+  const horaAgora = hoje.toTimeString().slice(0, 5);
+
+  document.getElementById('meetingDate').value = dataHoje;
+  document.getElementById('meetingStartTime').value = horaAgora;
+  document.getElementById('meetingEndTime').value = '';
+  document.getElementById('meetingSubject').value = '';
+  document.getElementById('meetingParticipants').value = '';
+  document.getElementById('participantesContainer').innerHTML = '';
+  document.getElementById('meetingError').textContent = '';
+}
+
+    function closeMeetingModal() {
+      document.getElementById('meetingModal').style.display = 'none';
+      currentMeetingId = null;
+      currentRoom = null;
+    }
+
+    async function editMeeting(id) {
+      try {
+        const res = await api.get('/meetings');
+        const meeting = res.data.find(m => m.id === id);
+        
+        if (!meeting) return alert('Reunião não encontrada');
+        
+        currentMeetingId = id;
+        currentRoom = meeting.room_location;
+        
+        document.getElementById('modalTitle').textContent = 'Editar Reunião';
+        document.getElementById('meetingRoom').value = meeting.room_location;
+        document.getElementById('meetingDate').value = meeting.date;
+        document.getElementById('meetingStartTime').value = meeting.start_time;
+        document.getElementById('meetingEndTime').value = meeting.end_time;
+        document.getElementById('meetingSubject').value = meeting.subject;
+        document.getElementById('meetingParticipants').value = meeting.participants;
+        document.getElementById('meetingError').textContent = '';
+        document.getElementById('meetingModal').style.display = 'block';
+          const participantesContainer = document.getElementById('participantesContainer');
+  participantesContainer.innerHTML = '';
+  
+  if (meeting.participants_names) {
+    const nomes = meeting.participants_names.split(', ');
+    for (let i = 0; i < nomes.length; i++) {
+      const div = document.createElement('div');
+      div.className = 'participante-item';
+      div.innerHTML = `
+        <label>Participante ${i + 1}:</label>
+        <input type="text" id="participante_${i + 1}" 
+               value="${nomes[i]}" required />
+      `;
+      participantesContainer.appendChild(div);
+    }
+  }
+
+      } catch {
+        alert('Erro ao carregar reunião');
+      }
+    }
+
+    // Função auxiliar para converter horário em minutos
+    function timeToMinutes(time) {
+      const [hours, minutes] = time.split(':').map(Number);
+      return hours * 60 + minutes;
+    }
+
+   async function saveMeeting() {
+  const data = {
+    room_location: document.getElementById('meetingRoom').value,
+    date: document.getElementById('meetingDate').value,
+    start_time: document.getElementById('meetingStartTime').value,
+    end_time: document.getElementById('meetingEndTime').value,
+    subject: document.getElementById('meetingSubject').value.trim(),
+    participants: parseInt(document.getElementById('meetingParticipants').value)
+  };
+
+  const errDiv = document.getElementById('meetingError');
+  errDiv.textContent = '';
+
+  // Validações
+  if (!data.date || !data.start_time || !data.end_time || !data.subject || isNaN(data.participants)) {
+    errDiv.textContent = 'Preencha todos os campos obrigatórios.';
+    return;
+  }
+
+  if (data.start_time >= data.end_time) {
+    errDiv.textContent = 'O horário de término deve ser após o horário de início.';
+    return;
+  }
+
+  if (data.participants < 1) {
+    errDiv.textContent = 'Informe pelo menos 1 participante.';
+    return;
+  }
+
+  // Coleta nomes dos participantes
+  const nomes = [];
+  for (let i = 1; i <= data.participants; i++) {
+    const input = document.getElementById(`participante_${i}`);
+    if (input && input.value.trim()) {
+      nomes.push(input.value.trim());
+    }
+  }
+
+  if (nomes.length !== data.participants) {
+    errDiv.textContent = 'Preencha o nome de todos os participantes.';
+    return;
+  }
+
+  data.participants_names = nomes.join(', ');
+
+  try {
+    if (currentMeetingId) {
+      // Atualizar reunião existente
+      await api.put(`/meetings/${currentMeetingId}`, data);
+    } else {
+      // Criar nova reunião
+      await api.post('/meetings', data);
+    }
+
+    closeMeetingModal();
+    loadMeetings();
+    if (calendar) calendar.refetchEvents();
+  } catch (error) {
+    console.error('Erro ao salvar reunião:', error);
+    errDiv.textContent = error.response?.data?.error || 'Erro ao salvar reunião';
+  }
+}
+
+
+// Função auxiliar para edição (para preencher os participantes existentes)
+async function editMeeting(id) {
+  try {
+    const res = await api.get('/meetings');
+    const meeting = res.data.find(m => m.id === id);
+    
+    if (!meeting) return alert('Reunião não encontrada');
+    
+    currentMeetingId = id;
+    currentRoom = meeting.room_location;
+    
+    document.getElementById('modalTitle').textContent = 'Editar Reunião';
+    document.getElementById('meetingRoom').value = meeting.room_location;
+    document.getElementById('meetingDate').value = meeting.date;
+    document.getElementById('meetingStartTime').value = meeting.start_time;
+    document.getElementById('meetingEndTime').value = meeting.end_time;
+    document.getElementById('meetingSubject').value = meeting.subject;
+    document.getElementById('meetingParticipants').value = meeting.participants;
+    
+    // Gerar campos para participantes existentes
+    const container = document.getElementById('participantesContainer');
+    container.innerHTML = '';
+    
+    if (meeting.participants_names) {
+      const nomes = meeting.participants_names.split(', ');
+      for (let i = 0; i < nomes.length; i++) {
+        const div = document.createElement('div');
+        div.className = 'participante-item';
+        div.innerHTML = `
+          <label>Participante ${i + 1}:</label>
+          <input type="text" id="participante_${i + 1}" 
+                 value="${nomes[i].trim()}" required />
+        `;
+        container.appendChild(div);
+      }
+    }
+    
+    document.getElementById('meetingError').textContent = '';
+    document.getElementById('meetingModal').style.display = 'block';
+  } catch (error) {
+    console.error('Erro ao cargar reunião:', error);
+    alert('Erro ao carregar reunião');
+  }
+}
+
+    async function deleteMeeting(id) {
+      if (!confirm('Deseja mesmo excluir esta reunião?')) return;
+      
+      try {
+        await api.delete(`/meetings/${id}`);
+        loadMeetings();
+        
+        if (calendar) {
+          calendar.refetchEvents();
+        }
+        
+        alert('Reunião excluída com sucesso!');
+      } catch {
+        alert('Erro ao excluir reunião');
+      }
+    }
+
+    // --- Eventos Globais ---
+    window.onclick = function(e) {
+      const modal = document.getElementById('meetingModal');
+      if (e.target === modal) closeMeetingModal();
+    };
+    
+    document.addEventListener('keydown', e => {
+      if (e.key === 'Escape') closeMeetingModal();
+    });
+  </script>
+</body>
+</html>
