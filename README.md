@@ -53,9 +53,9 @@ O sistema já vem com usuários criados para teste:
 - **Permissões**: Ver todas as reuniões e assuntos
 
 ### Usuário Normal
-- **Usuário**: `user`
-- **Senha**: `user123`
-- **Permissões**: Ver apenas suas próprias reuniões
+- **Usuário**: `visualizador`
+- **Senha**: `visual123`
+- **Permissões**: Ver apenas reuniões (sem permissão para editar)
 
 ## 📁 Estrutura de Arquivos
 
