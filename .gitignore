@@ -1,0 +1,4 @@
+meetings.db
+*.db
+node_modules/
+.env
