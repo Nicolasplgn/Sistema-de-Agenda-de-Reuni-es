@@ -11,8 +11,7 @@ const JWT_SECRET = process.env.JWT_SECRET || 'sua-chave-secreta-aqui';
 
 app.use(express.json());
 app.use(cors());
-app.use(express.static(path.join(__dirname, 'public')));
-
+app.use(express.static('public'));
 
 const db = new sqlite3.Database('./meetings.db', (err) => {
   if (err) console.error('Erro ao conectar ao banco de dados:', err.message);
@@ -21,16 +20,24 @@ const db = new sqlite3.Database('./meetings.db', (err) => {
 
 // --- Definição dos Departamentos ---
 const departmentsList = [
-    { id: 'pessoal', name: 'Departamento Pessoal' }, { id: 'legalizacao', name: 'Departamento Legalização' },
-    { id: 'contabil', name: 'Departamento Contábil' }, { id: 'financeiro', name: 'Departamento Financeiro' },
-    { id: 'fiscal', name: 'Departamento Fiscal' }, { id: 'rh', name: 'RH' }
+    { id: 'pessoal', name: 'Departamento Pessoal' },
+    { id: 'legalizacao', name: 'Departamento Legalização' },
+    { id: 'contabil', name: 'Departamento Contábil' },
+    { id: 'financeiro', name: 'Departamento Financeiro' },
+    { id: 'fiscal', name: 'Departamento Fiscal' },
+    { id: 'rh', name: 'RH' }
 ];
 const departmentMap = new Map(departmentsList.map(d => [d.id, d.name]));
 
+
 db.serialize(() => {
   db.run(`CREATE TABLE IF NOT EXISTS users (
-    id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE NOT NULL, password TEXT NOT NULL,
-    name TEXT NOT NULL, user_type TEXT NOT NULL DEFAULT 'viewer', created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT UNIQUE NOT NULL,
+    password TEXT NOT NULL,
+    name TEXT NOT NULL,
+    user_type TEXT NOT NULL DEFAULT 'viewer',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );`, (err) => {
     if (!err) {
       const users = [
@@ -48,12 +55,26 @@ db.serialize(() => {
   });
 
   db.run(`CREATE TABLE IF NOT EXISTS meetings (
-    id INTEGER PRIMARY KEY AUTOINCREMENT, room_location TEXT NOT NULL, date TEXT NOT NULL,
-    start_time TEXT NOT NULL, end_time TEXT NOT NULL, subject TEXT NOT NULL, organizer_id INTEGER NOT NULL,
-    department TEXT NOT NULL, participants INTEGER NOT NULL, participants_names TEXT,
-    status TEXT NOT NULL DEFAULT 'pendente', created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    room_location TEXT NOT NULL,
+    date TEXT NOT NULL,
+    start_time TEXT NOT NULL,
+    end_time TEXT NOT NULL,
+    subject TEXT NOT NULL,
+    organizer_id INTEGER NOT NULL,
+    department TEXT NOT NULL,
+    participants INTEGER NOT NULL,
+    participants_names TEXT,
+    status TEXT NOT NULL DEFAULT 'pendente',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (organizer_id) REFERENCES users(id)
-  );`);
+  );`, () => {
+      db.run("SELECT status FROM meetings LIMIT 1", (err) => {
+          if (err) {
+              db.run("ALTER TABLE meetings ADD COLUMN status TEXT NOT NULL DEFAULT 'pendente'");
+          }
+      });
+  });
 });
 
 const authenticateToken = (req, res, next) => {
@@ -88,71 +109,75 @@ app.get('/api/departments', authenticateToken, (req, res) => {
   res.json(departmentsList);
 });
 
-// Rota de Reuniões com Lógica de Status Aprimorada
 app.get('/api/meetings', authenticateToken, (req, res) => {
-  const { statusFiltro } = req.query;
-  let query = `SELECT m.*, u.name as organizer_name FROM meetings m JOIN users u ON m.organizer_id = u.id`;
+  const { status } = req.query;
+  let query = `
+    SELECT 
+      m.*, 
+      u.name as organizer_name,
+      CASE 
+        WHEN m.status = 'excluida' THEN 'excluida'
+        WHEN datetime(m.date || ' ' || m.end_time) < datetime('now', 'localtime') THEN 'concluida' 
+        ELSE 'pendente' 
+      END as computed_status
+    FROM meetings m 
+    JOIN users u ON m.organizer_id = u.id
+  `;
+  const params = [];
+
+  let whereClauses = [];
+  if (status === 'pendente') {
+    whereClauses.push("datetime(m.date || ' ' || m.end_time) >= datetime('now', 'localtime')");
+    whereClauses.push("m.status = 'pendente'");
+  } else if (status === 'concluida') {
+    whereClauses.push("datetime(m.date || ' ' || m.end_time) < datetime('now', 'localtime')");
+    whereClauses.push("m.status = 'pendente'");
+  } else {
+    whereClauses.push("m.status != 'excluida'");
+  }
   
-  if (req.user.user_type === 'viewer') {
-    query += " WHERE m.status != 'excluida'";
+  if(whereClauses.length > 0) {
+    query += ' WHERE ' + whereClauses.join(' AND ');
   }
 
   query += ' ORDER BY m.date, m.start_time;';
   
-  db.all(query, [], (err, meetings) => {
+  db.all(query, params, (err, meetings) => {
     if (err) return res.status(500).json({ error: 'Erro ao carregar reuniões' });
     
-    const now = new Date();
-    let processedMeetings = meetings.map(m => {
-        const startDateTime = new Date(`${m.date}T${m.start_time}`);
-        const endDateTime = new Date(`${m.date}T${m.end_time}`);
-        let computed_status = 'pendente';
-
-        if (m.status === 'cancelada') computed_status = 'cancelada';
-        else if (m.status === 'excluida') computed_status = 'excluida';
-        else if (now >= startDateTime && now <= endDateTime) computed_status = 'em_andamento';
-        else if (now > endDateTime) computed_status = 'concluida';
-        
-        return { ...m, computed_status };
-    });
-
-    if (statusFiltro) {
-        processedMeetings = processedMeetings.filter(m => m.computed_status === statusFiltro);
+    if (req.user.user_type === 'viewer') {
+      const sanitizedMeetings = meetings.map(meeting => ({
+        ...meeting,
+        subject: 'Reservado',
+        department: 'N/A',
+        organizer_name: 'N/A',
+        participants_names: null
+      }));
+      return res.json(sanitizedMeetings);
     }
     
-    // Usuário visualizador não vê detalhes
-    if (req.user.user_type === 'viewer') {
-      processedMeetings = processedMeetings.map(m => ({
+    const meetingsWithDeptName = meetings.map(m => ({
         ...m,
-        subject: 'Reservado', department: 'N/A',
-        organizer_name: 'N/A', participants_names: null
-      }));
-    } else {
-        processedMeetings = processedMeetings.map(m => ({
-            ...m, department: departmentMap.get(m.department) || m.department
-        }));
-    }
-    res.json(processedMeetings.filter(m => m.computed_status !== 'excluida'));
+        department: departmentMap.get(m.department) || m.department
+    }));
+
+    res.json(meetingsWithDeptName);
   });
 });
 
-function getStatusDisplay(meeting) {
-    const now = new Date();
-    const startDateTime = new Date(`${meeting.date}T${meeting.start_time}`);
-    const endDateTime = new Date(`${meeting.date}T${meeting.end_time}`);
-
-    if (meeting.status === 'cancelada') return 'Cancelada';
-    if (meeting.status === 'excluida') return 'Excluída';
-    if (now >= startDateTime && now <= endDateTime) return 'Em Andamento';
-    if (now > endDateTime) return 'Concluída';
-    return 'Pendente';
-}
-
 function buildReportQuery(queryParams) {
-    const { dataInicio, dataFim, sala, status } = queryParams;
+    const { dataInicio, dataFim, sala } = queryParams;
     let query = `
-        SELECT m.*, u.name as organizer_name
-        FROM meetings m JOIN users u ON m.organizer_id = u.id
+        SELECT 
+            m.id, m.date, m.start_time, m.end_time, m.room_location, m.department,
+            m.subject, u.name as organizer_name, m.participants_names,
+            CASE 
+                WHEN m.status = 'excluida' THEN 'Excluída'
+                WHEN datetime(m.date || ' ' || m.end_time) < datetime('now', 'localtime') THEN 'Concluída'
+                ELSE 'Pendente'
+            END as status_display
+        FROM meetings m
+        JOIN users u ON m.organizer_id = u.id
     `;
     const conditions = [];
     const params = [];
@@ -163,92 +188,149 @@ function buildReportQuery(queryParams) {
     
     if (conditions.length > 0) query += ' WHERE ' + conditions.join(' AND ');
     query += ' ORDER BY m.date DESC, m.start_time DESC;';
-    return { query, params, statusFilter: status };
+    return { query, params };
 }
 
 app.get('/api/meetings/historico', authenticateToken, isAdmin, (req, res) => {
-    const { query, params, statusFilter } = buildReportQuery(req.query);
+    const { query, params } = buildReportQuery(req.query);
     db.all(query, params, (err, meetings) => {
       if (err) return res.status(500).json({ error: 'Erro no banco de dados ao gerar relatório' });
       
-      let meetingsWithDeptName = meetings.map(m => ({
+      const meetingsWithDeptName = meetings.map(m => ({
           ...m,
-          department: departmentMap.get(m.department) || m.department,
-          status_display: getStatusDisplay(m)
+          department: departmentMap.get(m.department) || m.department
       }));
-
-      if(statusFilter && statusFilter !== 'todos'){
-          meetingsWithDeptName = meetingsWithDeptName.filter(m => m.status_display.toLowerCase().replace(' ', '_') === statusFilter);
-      }
-      
       res.json(meetingsWithDeptName);
     });
 });
 
+// --- ROTA DE EXPORTAÇÃO CSV CORRIGIDA ---
 app.get('/api/meetings/exportar', authenticateToken, isAdmin, (req, res) => {
-    const { query, params, statusFilter } = buildReportQuery(req.query);
+    const { query, params } = buildReportQuery(req.query);
     db.all(query, params, (err, meetings) => {
-      if (err) return res.status(500).json({ error: 'Erro no banco de dados ao exportar' });
-      
-      let meetingsWithDeptName = meetings.map(m => ({
-          ...m, department: departmentMap.get(m.department) || m.department, status_display: getStatusDisplay(m)
-      }));
-      if(statusFilter && statusFilter !== 'todos'){
-          meetingsWithDeptName = meetingsWithDeptName.filter(m => m.status_display.toLowerCase().replace(' ', '_') === statusFilter);
+      if (err) {
+          console.error("Erro no banco de dados ao exportar CSV:", err);
+          return res.status(500).json({ error: 'Erro no banco de dados ao exportar' });
       }
-
+      
       const headers = ['Data', 'Hora Início', 'Hora Fim', 'Sala', 'Departamento', 'Assunto', 'Organizador', 'Participantes', 'Status'];
       let csv = headers.join(';') + '\r\n';
-      meetingsWithDeptName.forEach(m => {
+      
+      try {
+        meetings.forEach(m => {
           const row = [
-            m.date ? new Date(m.date + 'T00:00:00').toLocaleDateString('pt-BR') : '', m.start_time || '', m.end_time || '',
-            m.room_location === 'baixo' ? 'Sala de Baixo' : 'Sala de Cima', m.department || '',
-            `"${(m.subject || '').replace(/"/g, '""')}"`, `"${(m.organizer_name || '').replace(/"/g, '""')}"`,
-            `"${(m.participants_names || '').replace(/"/g, '""')}"`, m.status_display || ''
+            m.date ? new Date(m.date + 'T00:00:00').toLocaleDateString('pt-BR') : '',
+            m.start_time || '',
+            m.end_time || '',
+            m.room_location === 'baixo' ? 'Sala de Baixo' : 'Sala de Cima',
+            departmentMap.get(m.department) || m.department || '',
+            `"${(m.subject || '').replace(/"/g, '""')}"`,
+            `"${(m.organizer_name || '').replace(/"/g, '""')}"`,
+            `"${(m.participants_names || '').replace(/"/g, '""')}"`,
+            m.status_display || ''
           ];
           csv += row.join(';') + '\r\n';
-      });
-      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-      res.setHeader('Content-Disposition', 'attachment; filename=relatorio_reunioes.csv');
-      res.send(Buffer.from(csv, 'utf-8'));
+        });
+        
+        res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+        res.setHeader('Content-Disposition', 'attachment; filename=relatorio_reunioes.csv');
+        res.send(Buffer.from(csv, 'utf-8'));
+      } catch(e) {
+          console.error("Erro ao gerar string CSV para exportação:", e);
+          res.status(500).json({ error: 'Erro interno no servidor ao gerar o arquivo CSV.' });
+      }
     });
 });
 
-
+// --- ROTA DE EXPORTAÇÃO HTML ---
 app.get('/api/meetings/exportar_html', authenticateToken, isAdmin, (req, res) => {
-    const { query, params, statusFilter } = buildReportQuery(req.query);
+    const { query, params } = buildReportQuery(req.query);
     db.all(query, params, (err, meetings) => {
-        if (err) return res.status(500).json({ error: 'Erro ao exportar HTML' });
+      if (err) {
+        console.error("Erro no banco de dados ao exportar HTML:", err);
+        return res.status(500).json({ error: 'Erro no banco de dados ao exportar' });
+      }
 
-        let meetingsWithDeptName = meetings.map(m => ({
-            ...m, department: departmentMap.get(m.department) || m.department, status_display: getStatusDisplay(m)
-        }));
-        if(statusFilter && statusFilter !== 'todos'){
-            meetingsWithDeptName = meetingsWithDeptName.filter(m => m.status_display.toLowerCase().replace(' ', '_') === statusFilter);
-        }
-
+      try {
         let html = `
-          <html lang="pt-BR"><head><meta charset="UTF-8" /><title>Relatório de Reuniões</title><style>body{font-family:Arial,sans-serif;background:#f4f4f4;color:#333;margin:20px}h2{text-align:center;color:#111}table{width:100%;border-collapse:collapse;background:white;box-shadow:0 2px 5px rgba(0,0,0,.1)}th,td{padding:12px 15px;border:1px solid #ddd;text-align:left}th{background:#222;color:#ffc107;text-transform:uppercase}tr:nth-child(even){background:#f9f9f9}tr:hover{background:#f1f1f1}</style></head>
-          <body><h2>Relatório de Reuniões</h2><table><thead><tr><th>Data</th><th>Horário</th><th>Sala</th><th>Departamento</th><th>Assunto</th><th>Organizador</th><th>Participantes</th><th>Status</th></tr></thead><tbody>`;
-        meetingsWithDeptName.forEach(m => {
-            html += `<tr><td>${m.date ? new Date(m.date + 'T00:00:00').toLocaleDateString('pt-BR') : ''}</td><td>${m.start_time || ''} - ${m.end_time || ''}</td><td>${m.room_location === 'baixo' ? 'Sala de Baixo' : 'Sala de Cima'}</td><td>${m.department || ''}</td><td>${m.subject || ''}</td><td>${m.organizer_name || ''}</td><td>${m.participants_names || ''}</td><td>${m.status_display || ''}</td></tr>`;
+          <html lang="pt-BR">
+          <head>
+            <meta charset="UTF-8" />
+            <title>Relatório de Reuniões</title>
+            <style>
+              body { font-family: Arial, sans-serif; background: #f4f4f4; color: #333; margin: 20px; }
+              h2 { text-align: center; color: #111; }
+              table { width: 100%; border-collapse: collapse; background: white; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
+              th, td { padding: 12px 15px; border: 1px solid #ddd; text-align: left; }
+              th { background: #222; color: #ffc107; text-transform: uppercase; }
+              tr:nth-child(even) { background: #f9f9f9; }
+              tr:hover { background: #f1f1f1; }
+            </style>
+          </head>
+          <body>
+            <h2>Relatório de Reuniões</h2>
+            <table>
+              <thead>
+                <tr>
+                  <th>Data</th>
+                  <th>Horário</th>
+                  <th>Sala</th>
+                  <th>Departamento</th>
+                  <th>Assunto</th>
+                  <th>Organizador</th>
+                  <th>Participantes</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+        `;
+
+        meetings.forEach(m => {
+          html += `
+            <tr>
+              <td>${m.date ? new Date(m.date + 'T00:00:00').toLocaleDateString('pt-BR') : ''}</td>
+              <td>${m.start_time || ''} - ${m.end_time || ''}</td>
+              <td>${m.room_location === 'baixo' ? 'Sala de Baixo' : 'Sala de Cima'}</td>
+              <td>${departmentMap.get(m.department) || m.department || ''}</td>
+              <td>${m.subject || ''}</td>
+              <td>${m.organizer_name || ''}</td>
+              <td>${m.participants_names || ''}</td>
+              <td>${m.status_display || ''}</td>
+            </tr>
+          `;
         });
-        html += `</tbody></table></body></html>`;
+
+        html += `
+              </tbody>
+            </table>
+          </body>
+          </html>
+        `;
+
         res.setHeader('Content-Type', 'text/html; charset=utf-8');
         res.setHeader('Content-Disposition', 'attachment; filename=relatorio_reunioes.html');
         res.send(html);
+      } catch (e) {
+        console.error("Erro ao gerar string HTML para exportação:", e);
+        res.status(500).json({ error: 'Erro interno no servidor ao gerar o arquivo HTML.' });
+      }
     });
 });
 
+
 app.get('/api/meetings/:id', authenticateToken, (req, res) => {
   const { id } = req.params;
-  db.get(`SELECT m.* FROM meetings m WHERE m.id = ?;`, [id], (err, meeting) => {
+  const query = `SELECT m.* FROM meetings m WHERE m.id = ?;`;
+  db.get(query, [id], (err, meeting) => {
     if (err) return res.status(500).json({ error: 'Erro ao buscar reunião.' });
     if (!meeting) return res.status(404).json({ error: 'Reunião não encontrada.' });
+    
     if (req.user.user_type === 'viewer') {
-        meeting.subject = 'Reservado'; meeting.department = 'N/A';
+        meeting.subject = 'Reservado';
+        meeting.department = 'N/A';
         meeting.participants_names = null;
     }
+
     res.json(meeting);
   });
 });
@@ -256,10 +338,13 @@ app.get('/api/meetings/:id', authenticateToken, (req, res) => {
 const checkConflict = (req, res, next) => {
   const { room_location, date, start_time, end_time } = req.body;
   const meetingIdToExclude = req.params.id || -1;
-  const conflictQuery = `SELECT id FROM meetings WHERE room_location = ? AND date = ? AND id != ? AND status = 'pendente' AND start_time < ? AND end_time > ?`;
+  const conflictQuery = `
+    SELECT id FROM meetings 
+    WHERE room_location = ? AND date = ? AND id != ? AND status = 'pendente' AND start_time < ? AND end_time > ?
+  `;
   db.get(conflictQuery, [room_location, date, meetingIdToExclude, end_time, start_time], (err, row) => {
     if (err) return res.status(500).json({ error: 'Erro ao verificar conflitos.' });
-    if (row) return res.status(409).json({ error: 'Conflito de horário! Já existe uma reunião agendada neste período.' });
+    if (row) return res.status(409).json({ error: 'Conflito de horário! Já existe uma reunião agendada neste período para a sala selecionada.' });
     next();
   });
 };
@@ -278,22 +363,12 @@ app.post('/api/meetings', authenticateToken, isAdmin, checkConflict, (req, res) 
 app.put('/api/meetings/:id', authenticateToken, isAdmin, checkConflict, (req, res) => {
   const { id } = req.params;
   const { room_location, date, start_time, end_time, subject, participants, participants_names, department } = req.body;
-  db.run(`UPDATE meetings SET room_location = ?, date = ?, start_time = ?, end_time = ?, subject = ?, participants = ?, participants_names = ?, department = ? WHERE id = ?;`,
+  db.run(`UPDATE meetings SET room_location = ?, date = ?, start_time = ?, end_time = ?, subject = ?, participants = ?, participants_names = ?, department = ? WHERE id = ? AND status = 'pendente';`,
     [room_location, date, start_time, end_time, subject, participants, participants_names, department, id], (err) => {
       if (err) return res.status(500).json({ error: 'Erro ao atualizar reunião.' });
       res.json({ message: 'Reunião atualizada com sucesso!' });
     }
   );
-});
-
-// Nova Rota para Cancelar
-app.put('/api/meetings/:id/cancel', authenticateToken, isAdmin, (req, res) => {
-  const { id } = req.params;
-  db.run(`UPDATE meetings SET status = 'cancelada' WHERE id = ? AND status = 'pendente';`, [id], function(err) {
-      if (err) return res.status(500).json({ error: 'Erro ao cancelar reunião.' });
-      if (this.changes === 0) return res.status(404).json({ error: 'Reunião não encontrada ou já finalizada.' });
-      res.json({ message: 'Reunião cancelada com sucesso!' });
-  });
 });
 
 app.delete('/api/meetings/:id', authenticateToken, isAdmin, (req, res) => {
@@ -310,5 +385,13 @@ app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.ht
 
 const server = app.listen(PORT, '0.0.0.0', () => console.log(`Servidor rodando na porta ${PORT}`));
 process.on('SIGINT', () => {
-  server.close(() => { db.close(); process.exit(0); });
+  console.log('Fechando servidor...');
+  server.close(() => {
+    console.log('Servidor fechado.');
+    db.close((err) => {
+      if (err) console.error('Erro ao fechar banco de dados:', err.message);
+      else console.log('Conexão com o banco encerrada.');
+      process.exit(0);
+    });
+  });
 });
