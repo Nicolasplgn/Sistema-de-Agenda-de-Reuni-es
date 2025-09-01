@@ -120,7 +120,6 @@ app.get('/api/meetings', authenticateToken, (req, res) => {
         processedMeetings = processedMeetings.filter(m => m.computed_status === statusFiltro);
     }
     
-    // Usuário visualizador não vê detalhes
     if (req.user.user_type === 'viewer') {
       processedMeetings = processedMeetings.map(m => ({
         ...m,
@@ -177,8 +176,16 @@ app.get('/api/meetings/historico', authenticateToken, isAdmin, (req, res) => {
           status_display: getStatusDisplay(m)
       }));
 
-      if(statusFilter && statusFilter !== 'todos'){
-          meetingsWithDeptName = meetingsWithDeptName.filter(m => m.status_display.toLowerCase().replace(' ', '_') === statusFilter);
+      if (statusFilter && statusFilter !== 'todos') {
+          meetingsWithDeptName = meetingsWithDeptName.filter(m => {
+              // ✨ CORREÇÃO APLICADA AQUI ✨
+              const normalizedStatus = m.status_display
+                  .normalize("NFD") // Decompõe caracteres acentuados (ex: 'í' -> 'i' + '´')
+                  .replace(/[\u0300-\u036f]/g, "") // Remove os acentos
+                  .toLowerCase()
+                  .replace(' ', '_');
+              return normalizedStatus === statusFilter;
+          });
       }
       
       res.json(meetingsWithDeptName);
@@ -193,8 +200,17 @@ app.get('/api/meetings/exportar', authenticateToken, isAdmin, (req, res) => {
       let meetingsWithDeptName = meetings.map(m => ({
           ...m, department: departmentMap.get(m.department) || m.department, status_display: getStatusDisplay(m)
       }));
-      if(statusFilter && statusFilter !== 'todos'){
-          meetingsWithDeptName = meetingsWithDeptName.filter(m => m.status_display.toLowerCase().replace(' ', '_') === statusFilter);
+      
+      if (statusFilter && statusFilter !== 'todos') {
+        meetingsWithDeptName = meetingsWithDeptName.filter(m => {
+            // ✨ CORREÇÃO APLICADA AQUI ✨
+            const normalizedStatus = m.status_display
+                .normalize("NFD")
+                .replace(/[\u0300-\u036f]/g, "")
+                .toLowerCase()
+                .replace(' ', '_');
+            return normalizedStatus === statusFilter;
+        });
       }
 
       const headers = ['Data', 'Hora Início', 'Hora Fim', 'Sala', 'Departamento', 'Assunto', 'Organizador', 'Participantes', 'Status'];
@@ -223,8 +239,17 @@ app.get('/api/meetings/exportar_html', authenticateToken, isAdmin, (req, res) =>
         let meetingsWithDeptName = meetings.map(m => ({
             ...m, department: departmentMap.get(m.department) || m.department, status_display: getStatusDisplay(m)
         }));
+
         if(statusFilter && statusFilter !== 'todos'){
-            meetingsWithDeptName = meetingsWithDeptName.filter(m => m.status_display.toLowerCase().replace(' ', '_') === statusFilter);
+          meetingsWithDeptName = meetingsWithDeptName.filter(m => {
+              // ✨ CORREÇÃO APLICADA AQUI ✨
+              const normalizedStatus = m.status_display
+                  .normalize("NFD")
+                  .replace(/[\u0300-\u036f]/g, "")
+                  .toLowerCase()
+                  .replace(' ', '_');
+              return normalizedStatus === statusFilter;
+          });
         }
 
         let html = `
@@ -286,7 +311,6 @@ app.put('/api/meetings/:id', authenticateToken, isAdmin, checkConflict, (req, re
   );
 });
 
-// Nova Rota para Cancelar
 app.put('/api/meetings/:id/cancel', authenticateToken, isAdmin, (req, res) => {
   const { id } = req.params;
   db.run(`UPDATE meetings SET status = 'cancelada' WHERE id = ? AND status = 'pendente';`, [id], function(err) {
