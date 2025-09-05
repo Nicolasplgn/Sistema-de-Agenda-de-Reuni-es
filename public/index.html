@@ -22,7 +22,7 @@
     .user-info { display: flex; align-items: center; gap: 15px; }
     .badge { background: var(--primary-color); color: var(--dark-bg); padding: 5px 12px; border-radius: 20px; font-size: 12px; font-weight: bold; }
     .badge.admin { background: var(--danger-color); color: white; }
-    .badge.viewer { background: var(--info-color); color: white; }
+    .badge.department { background: var(--info-color); color: white; }
     header button { background: var(--border-color); color: var(--primary-color); border: 1px solid var(--primary-color); padding: 0.5rem 1rem; border-radius: 6px; cursor: pointer; transition: all 0.3s; font-weight: bold; }
     header button:hover { background: var(--primary-color); color: var(--dark-bg); }
     .tabs { display: flex; gap: 10px; margin: 1rem 2rem 0; border-bottom: 1px solid var(--border-color); padding-bottom: 10px; }
@@ -63,17 +63,12 @@
     .participantes-container { margin-top: 1rem; display: grid; gap: 10px; max-height: 150px; overflow-y: auto; padding: 10px; background: var(--darker-bg); border-radius: 6px; }
     @keyframes fa-spin { from { transform: rotate(0deg); } to { transform: rotate(359deg); } }
     @media (max-width: 768px) { .form-row, .rooms-container, .filtros-container { grid-template-columns: 1fr; } }
-
-    /* --- NOVOS ESTILOS PARA O CARD DE REUNIÃO --- */
-    .meeting-item {
-      background: var(--darker-bg); border-left: 5px solid; border-radius: 8px;
-      padding: 15px; margin-bottom: 15px; display: flex; justify-content: space-between; align-items: flex-start; gap: 15px;
-    }
+    .meeting-item { background: var(--darker-bg); border-left: 5px solid; border-radius: 8px; padding: 15px; margin-bottom: 15px; display: flex; justify-content: space-between; align-items: flex-start; gap: 15px; }
     .meeting-content { flex-grow: 1; }
     .meeting-date { font-weight: bold; font-size: 1.1em; color: var(--text-color); margin-bottom: 10px; }
     .meeting-details-list { list-style: none; padding: 0; display: flex; flex-direction: column; gap: 8px; }
     .meeting-details-list li { display: flex; align-items: center; font-size: 0.95em; color: var(--text-muted); }
-    .meeting-details-list li i { color: var(--primary-color); margin-right: 10px; }
+    .meeting-details-list li i { color: var(--primary-color); margin-right: 10px; width: 16px; text-align: center; }
     .meeting-details-list li strong { color: var(--text-color); }
     .meeting-actions-container { display: flex; align-items: center; gap: 10px; }
     .status-badge { font-size: 0.8em; font-weight: bold; padding: 6px 12px; border-radius: 20px; color: white; text-transform: uppercase; }
@@ -81,7 +76,17 @@
     .actions-group button { background: transparent; border: none; color: var(--dark-bg); padding: 8px 10px; cursor: pointer; transition: background-color 0.2s; font-size: 14px; }
     .actions-group button:hover { background-color: rgba(0,0,0,0.2); }
     .btn-delete-icon { background: var(--danger-color); color: white; border: none; border-radius: 50%; width: 32px; height: 32px; cursor: pointer; display: flex; align-items: center; justify-content: center; }
-
+    .attachment-link { color: white; text-decoration: none; cursor: pointer; }
+    .attachment-link:hover { text-decoration: underline; }
+    input[type="file"] { display: none; }
+    .file-upload-label {
+        background: #222; border: 1px dashed #444; border-radius: 6px; padding: 12px;
+        display: flex; align-items: center; justify-content: center; cursor: pointer; text-align: center;
+        color: var(--text-muted); transition: all 0.3s;
+    }
+    .file-upload-label:hover { border-color: var(--primary-color); color: var(--primary-color); }
+    .file-upload-label i { margin-right: 10px; }
+    #fileNameDisplay { margin-top: 8px; font-size: 13px; color: var(--primary-color); text-align: center; }
   </style>
 </head>
 <body>
@@ -137,6 +142,7 @@
         <div class="form-group"><label for="dataInicio">Data Início:</label><input type="date" id="dataInicio"></div>
         <div class="form-group"><label for="dataFim">Data Fim:</label><input type="date" id="dataFim"></div>
         <div class="form-group"><label for="salaRelatorio">Sala:</label><select id="salaRelatorio"><option value="todas">Todas</option><option value="baixo">Sala de Baixo</option><option value="cima">Sala de Cima</option></select></div>
+        <div class="form-group"><label for="departamentoRelatorio">Departamento:</label><select id="departamentoRelatorio"><option value="todos">Todos</option></select></div>
         <div class="form-group"><label for="statusRelatorio">Status:</label><select id="statusRelatorio"><option value="todos">Todos</option><option value="pendente">Pendente</option><option value="em_andamento">Em Andamento</option><option value="concluida">Concluída</option><option value="cancelada">Cancelada</option><option value="excluida">Excluída</option></select></div>
         <div class="form-group"><button class="btn btn-primary" style="width:100%;" onclick="carregarDadosRelatorio()">Carregar</button></div>
         <div class="form-group"><button class="btn" style="background-color:var(--success-color); color:white; width:100%;" onclick="exportarParaExcel()">Exportar CSV</button></div>
@@ -159,10 +165,19 @@
           <div class="form-group"><label for="meetingParticipants">Nº de Participantes *</label><input type="number" id="meetingParticipants" min="1" oninput="gerarCamposParticipantes()" required /></div>
         </div>
         <div class="form-row">
-          <div class="form-group"><label for="meetingStartTime">Início * (08:00-18:00)</label><input type="time" id="meetingStartTime" required /></div>
-          <div class="form-group"><label for="meetingEndTime">Fim * (08:00-18:00)</label><input type="time" id="meetingEndTime" required /></div>
+          <div class="form-group"><label for="meetingStartTime">Início *</label><input type="time" id="meetingStartTime" required /></div>
+          <div class="form-group"><label for="meetingEndTime">Fim *</label><input type="time" id="meetingEndTime" required /></div>
         </div>
         <div class="form-group"><label for="meetingSubject">Assunto da Reunião *</label><textarea id="meetingSubject" rows="3" required></textarea></div>
+        <div class="form-group">
+            <label for="meetingFile">Anexo (.doc, .docx, máx: 20MB)</label>
+            <label for="meetingFile" class="file-upload-label" id="fileUploadLabel">
+                <i class="fas fa-cloud-upload-alt"></i>
+                <span id="fileUploadText">Clique para selecionar um arquivo</span>
+            </label>
+            <input type="file" id="meetingFile" accept=".doc,.docx,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document" onchange="displayFileName()">
+            <div id="fileNameDisplay"></div>
+        </div>
         <div class="form-group"><label>Nomes dos Participantes</label><div id="participantesContainer" class="participantes-container"></div></div>
         <div style="display: flex; gap: 10px; margin-top: 20px;">
           <button type="submit" class="btn btn-primary">Salvar</button>
@@ -206,22 +221,27 @@
     }
 
     async function verifyToken() { try { const res = await api.get('/verify'); currentUser = res.data.user; await initializeUI(); } catch { logout(true); } }
+    
     async function initializeUI() {
         document.getElementById('loginScreen').style.display = 'none'; document.getElementById('mainScreen').style.display = 'block';
         document.getElementById('userName').textContent = currentUser.name;
         const userTypeSpan = document.getElementById('userType');
         userTypeSpan.textContent = currentUser.user_type.toUpperCase(); userTypeSpan.className = `badge ${currentUser.user_type}`;
-        if (currentUser.user_type === 'admin') {
-            document.getElementById('tabRelatorio').style.display = 'block'; document.querySelectorAll('.btn-agendar').forEach(btn => btn.style.display = 'block');
-            await loadDepartments();
-        } else {
-            document.getElementById('tabRelatorio').style.display = 'none'; document.querySelectorAll('.btn-agendar').forEach(btn => btn.style.display = 'none');
-        }
+        
+        const canManage = currentUser.user_type === 'admin' || currentUser.user_type === 'department';
+        const isAdmin = currentUser.user_type === 'admin';
+
+        document.getElementById('tabRelatorio').style.display = isAdmin ? 'block' : 'none';
+        document.querySelectorAll('.btn-agendar').forEach(btn => btn.style.display = canManage ? 'block' : 'none');
+
+        if (canManage) await loadDepartments();
+        
         showTab('salas'); initCalendar(); loadMeetings();
-        setInterval(checkForUpcomingMeetings, 60000); // Checa reuniões a cada minuto
+        setInterval(checkForUpcomingMeetings, 60000);
     }
     
     function logout(isSessionExpired = false) { if (!isSessionExpired && !confirm('Tem certeza que deseja sair?')) return; localStorage.removeItem('token'); window.location.reload(); }
+    
     function showTab(tabId) {
         document.querySelectorAll('.view').forEach(v => v.classList.remove('active')); document.getElementById(`${tabId}View`).classList.add('active');
         document.querySelectorAll('.tab-button').forEach(b => b.classList.remove('active')); document.getElementById(`tab${tabId.charAt(0).toUpperCase() + tabId.slice(1)}`).classList.add('active');
@@ -229,6 +249,7 @@
         if (tabId === 'salas') loadMeetings();
     }
     
+    // ✨ FUNÇÃO DO CALENDÁRIO ATUALIZADA ✨
     function initCalendar() {
       if (calendar) calendar.destroy();
       calendar = new FullCalendar.Calendar(document.getElementById('calendar'), {
@@ -237,17 +258,34 @@
         buttonText: { today: 'Hoje', month: 'Mês', week: 'Semana', list: 'Agenda' },
         events: (fetchInfo, successCallback, failureCallback) => {
           api.get('/meetings').then(res => {
-            successCallback(res.data.map(m => ({
-                id: m.id, title: m.subject, start: `${m.date}T${m.start_time}`, end: `${m.date}T${m.end_time}`,
-                backgroundColor: statusConfig[m.computed_status]?.color || 'var(--primary-color)',
-                borderColor: statusConfig[m.computed_status]?.color || 'var(--primary-color)',
-                textColor: 'white', extendedProps: m
-            })));
+            successCallback(res.data.map(m => {
+                const isReserved = m.subject === 'Reservado';
+                const eventTitle = isReserved ? 'Reservado' : m.subject + (m.file_path ? ' 📎' : '');
+
+                return {
+                    id: m.id,
+                    title: eventTitle,
+                    start: `${m.date}T${m.start_time}`,
+                    end: `${m.date}T${m.end_time}`,
+                    backgroundColor: statusConfig[m.computed_status]?.color || 'var(--primary-color)',
+                    borderColor: statusConfig[m.computed_status]?.color || 'var(--primary-color)',
+                    textColor: 'white',
+                    extendedProps: m
+                };
+            }));
           }).catch(failureCallback);
         },
         eventClick: (info) => {
           const props = info.event.extendedProps;
+          
+          if (props.subject === 'Reservado') {
+            const msg = `Horário Reservado - Entre ${props.start_time} e ${props.end_time}`;
+            alert(msg);
+            return;
+          }
+          
           let msg = `Assunto: ${props.subject}\nSala: ${props.room_location === 'baixo' ? 'Sala de Baixo' : 'Sala de Cima'}\nDepto: ${props.department}\nHorário: ${props.start_time} - ${props.end_time}\nOrganizador: ${props.organizer_name}\nParticipantes: ${props.participants_names || 'N/A'}`;
+          if (props.file_path) { msg += `\n\nUm anexo está disponível para esta reunião.` }
           alert(msg);
         }
       });
@@ -258,6 +296,7 @@
         try {
             const statusFiltro = document.getElementById('statusFiltro').value;
             const { data } = await api.get('/meetings', { params: { statusFiltro } });
+            // A Aba Salas continua usando a mesma função, que vai renderizar os dados que o servidor mandar
             renderMeetingsInContainer(document.getElementById('meetingsBaixo'), data.filter(m => m.room_location === 'baixo'));
             renderMeetingsInContainer(document.getElementById('meetingsCima'), data.filter(m => m.room_location === 'cima'));
             if (calendar) calendar.refetchEvents();
@@ -268,6 +307,7 @@
         }
     }
 
+    // A renderização da Aba Salas não foi alterada
     function renderMeetingsInContainer(container, meetings) {
         if (!meetings || meetings.length === 0) {
             container.innerHTML = '<div class="state-message"><i class="far fa-calendar-check"></i><p>Nenhuma reunião encontrada.</p></div>'; return;
@@ -275,25 +315,28 @@
         container.innerHTML = meetings.map(m => {
             const statusInfo = statusConfig[m.computed_status] || statusConfig.pendente;
             const canAdmin = currentUser.user_type === 'admin';
+            const isReserved = m.subject === 'Reservado';
             
             let actionsHtml = '';
-            if (canAdmin) {
+            if (!isReserved) {
                 const status = m.computed_status;
                 if (status === 'pendente' || status === 'em_andamento') {
                     actionsHtml = `<div class="actions-group" style="background-color: ${statusInfo.color};">
                         <button title="Editar" onclick="openMeetingModal(null, ${m.id})"><i class="fas fa-pen"></i></button>
                         ${status === 'pendente' ? `<button title="Cancelar" onclick="cancelMeeting(${m.id})"><i class="fas fa-ban"></i></button>` : ''}
-                        <button title="Excluir" onclick="deleteMeeting(${m.id})"><i class="fas fa-trash"></i></button>
+                        ${canAdmin ? `<button title="Excluir" onclick="deleteMeeting(${m.id})"><i class="fas fa-trash"></i></button>` : ''}
                     </div>`;
                 } else {
                     actionsHtml = `<div class="meeting-actions-container">
                         <span class="status-badge" style="background-color:${statusInfo.color};">${statusInfo.label}</span>
-                        <button class="btn-delete-icon" title="Excluir" onclick="deleteMeeting(${m.id})"><i class="fas fa-trash"></i></button>
+                        ${canAdmin ? `<button class="btn-delete-icon" title="Excluir" onclick="deleteMeeting(${m.id})"><i class="fas fa-trash"></i></button>` : ''}
                     </div>`;
                 }
             } else {
                 actionsHtml = `<span class="status-badge" style="background-color:${statusInfo.color};">${statusInfo.label}</span>`;
             }
+            
+            const attachmentHtml = m.file_path ? `<li><i class="fas fa-paperclip fa-fw"></i> <a href="#" onclick="event.preventDefault(); downloadAttachment(${m.id})" class="attachment-link">Visualizar anexo</a></li>` : '';
 
             return `<div class="meeting-item" style="border-left-color: ${statusInfo.color};">
                 <div class="meeting-content">
@@ -303,7 +346,8 @@
                         <li><i class="fas fa-comment-dots fa-fw"></i> ${m.subject}</li>
                         <li><i class="fas fa-building fa-fw"></i> ${m.department}</li>
                         <li><i class="fas fa-user-tie fa-fw"></i> ${m.organizer_name}</li>
-                        <li><i class="fas fa-users fa-fw"></i> ${m.participants_names || 'Não informado'} (${m.participants}p)</li>
+                        ${!isReserved ? `<li><i class="fas fa-users fa-fw"></i> ${m.participants_names || 'Não informado'} (${m.participants}p)</li>` : ''}
+                        ${attachmentHtml}
                     </ul>
                 </div>
                 <div class="meeting-actions-container">
@@ -316,6 +360,12 @@
     async function openMeetingModal(room, meetingId = null) {
       currentMeetingId = meetingId;
       document.getElementById('meetingForm').reset(); document.getElementById('participantesContainer').innerHTML = ''; document.getElementById('meetingError').textContent = '';
+      displayFileName();
+      const deptSelect = document.getElementById('meetingDepartment');
+      deptSelect.disabled = currentUser.user_type === 'department';
+      if(currentUser.user_type === 'department') {
+          deptSelect.value = currentUser.username.split('_')[1];
+      }
       try {
         if (meetingId) {
             document.getElementById('modalTitle').textContent = 'Editar Reunião';
@@ -325,6 +375,10 @@
             document.getElementById('meetingEndTime').value = m.end_time; document.getElementById('meetingSubject').value = m.subject;
             document.getElementById('meetingParticipants').value = m.participants; gerarCamposParticipantes();
             if (m.participants_names) { m.participants_names.split(',').forEach((n, i) => { const el = document.getElementById(`participante_${i+1}`); if(el) el.value = n.trim(); }); }
+            if (m.file_path) {
+                const fileName = m.file_path.split('-').slice(2).join('-');
+                displayFileName(fileName, true);
+            }
         } else {
             document.getElementById('modalTitle').textContent = 'Nova Reunião'; document.getElementById('meetingRoom').value = room;
             document.getElementById('meetingDate').valueAsDate = new Date();
@@ -337,18 +391,30 @@
 
     async function saveMeeting() {
       const errDiv = document.getElementById('meetingError'); errDiv.textContent = '';
-      const data = {
-        room_location: document.getElementById('meetingRoom').value, department: document.getElementById('meetingDepartment').value, date: document.getElementById('meetingDate').value,
-        start_time: document.getElementById('meetingStartTime').value, end_time: document.getElementById('meetingEndTime').value, subject: document.getElementById('meetingSubject').value.trim(),
-        participants: parseInt(document.getElementById('meetingParticipants').value, 10),
-        participants_names: Array.from({ length: parseInt(document.getElementById('meetingParticipants').value, 10) || 0 }, (_, i) => document.getElementById(`participante_${i + 1}`)?.value.trim()).join(', ')
-      };
-      if (!data.subject || !data.date || !data.start_time || !data.end_time || !data.department) { errDiv.textContent = 'Preencha todos os campos obrigatórios.'; return; }
-      if (data.start_time >= data.end_time) { errDiv.textContent = 'O horário de término deve ser após o de início.'; return; }
-      if (data.start_time < "08:00" || data.end_time > "18:00") { errDiv.textContent = 'As reuniões devem ocorrer entre 08:00 e 18:00.'; return; }
+      const fileInput = document.getElementById('meetingFile');
+      const file = fileInput.files[0];
+      if (file && file.size > 20 * 1024 * 1024) {
+          errDiv.textContent = 'O arquivo excede o limite de 20MB.'; return;
+      }
+      const formData = new FormData();
+      formData.append('room_location', document.getElementById('meetingRoom').value);
+      formData.append('department', document.getElementById('meetingDepartment').value);
+      formData.append('date', document.getElementById('meetingDate').value);
+      formData.append('start_time', document.getElementById('meetingStartTime').value);
+      formData.append('end_time', document.getElementById('meetingEndTime').value);
+      formData.append('subject', document.getElementById('meetingSubject').value.trim());
+      formData.append('participants', document.getElementById('meetingParticipants').value);
+      formData.append('participants_names', Array.from({ length: parseInt(document.getElementById('meetingParticipants').value, 10) || 0 }, (_, i) => document.getElementById(`participante_${i + 1}`)?.value.trim()).join(', '));
+      if (file) {
+          formData.append('attachment', file);
+      }
+      if (!formData.get('subject') || !formData.get('date') || !formData.get('start_time') || !formData.get('end_time') || !formData.get('department')) { errDiv.textContent = 'Preencha todos os campos obrigatórios.'; return; }
+      if (formData.get('start_time') >= formData.get('end_time')) { errDiv.textContent = 'O horário de término deve ser após o de início.'; return; }
+      if (formData.get('start_time') < "08:00" || formData.get('end_time') > "18:00") { errDiv.textContent = 'As reuniões devem ocorrer entre 08:00 e 18:00.'; return; }
       try {
         const method = currentMeetingId ? 'put' : 'post'; const url = currentMeetingId ? `/meetings/${currentMeetingId}` : '/meetings';
-        await api[method](url, data); closeMeetingModal(); loadMeetings();
+        await api[method](url, formData, { headers: { 'Content-Type': 'multipart/form-data' } });
+        closeMeetingModal(); loadMeetings();
       } catch (error) { errDiv.textContent = error.response?.data?.error || 'Ocorreu um erro ao salvar.'; }
     }
     
@@ -357,6 +423,7 @@
         try { await api.put(`/meetings/${id}/cancel`); loadMeetings(); }
         catch (error) { alert(error.response?.data?.error || 'Erro ao cancelar.'); }
     }
+
     async function deleteMeeting(id) {
       if (!confirm('Deseja mesmo EXCLUIR esta reunião? A ação não pode ser desfeita.')) return;
       try { await api.delete(`/meetings/${id}`); loadMeetings(); }
@@ -366,16 +433,31 @@
     async function carregarDadosRelatorio() {
       const div = document.getElementById('resultadoRelatorio'); div.innerHTML = `<div class="state-message"><i class="fas fa-spinner fa-spin"></i><p>Carregando...</p></div>`;
       try {
-        const params = { dataInicio: document.getElementById('dataInicio').value, dataFim: document.getElementById('dataFim').value, sala: document.getElementById('salaRelatorio').value, status: document.getElementById('statusRelatorio').value };
+        const params = { 
+            dataInicio: document.getElementById('dataInicio').value, 
+            dataFim: document.getElementById('dataFim').value, 
+            sala: document.getElementById('salaRelatorio').value, 
+            status: document.getElementById('statusRelatorio').value,
+            departamento: document.getElementById('departamentoRelatorio').value
+        };
         const { data: meetings } = await api.get('/meetings/historico', { params });
         if (!meetings || meetings.length === 0) { div.innerHTML = `<div class="state-message"><i class="fas fa-table"></i><p>Nenhuma reunião encontrada.</p></div>`; return; }
-        let html = `<p style="margin-bottom: 15px;">${meetings.length} reuniões encontradas.</p><table class="tabela-relatorio"><thead><tr><th>Data</th><th>Horário</th><th>Sala</th><th>Depto</th><th>Assunto</th><th>Organizador</th><th>Participantes</th><th>Status</th></tr></thead><tbody>`;
-        meetings.forEach(m => { html += `<tr><td>${formatDate(m.date)}</td><td>${m.start_time} - ${m.end_time}</td><td>${m.room_location === 'baixo' ? 'S. Baixo' : 'S. Cima'}</td><td>${m.department}</td><td>${m.subject}</td><td>${m.organizer_name}</td><td>${m.participants_names||'-'}</td><td>${m.status_display}</td></tr>`; });
+        let html = `<p style="margin-bottom: 15px;">${meetings.length} reuniões encontradas.</p><table class="tabela-relatorio"><thead><tr><th>Data</th><th>Horário</th><th>Sala</th><th>Depto</th><th>Assunto</th><th>Organizador</th><th>Participantes</th><th>Status</th><th>Anexo</th></tr></thead><tbody>`;
+        meetings.forEach(m => { 
+          const anexoHtml = m.file_path ? `<a href="#" onclick="event.preventDefault(); downloadAttachment(${m.id})" title="Visualizar anexo">📎</a>` : '-';
+          html += `<tr><td>${formatDate(m.date)}</td><td>${m.start_time} - ${m.end_time}</td><td>${m.room_location === 'baixo' ? 'S. Baixo' : 'S. Cima'}</td><td>${m.department}</td><td>${m.subject}</td><td>${m.organizer_name}</td><td>${m.participants_names||'-'}</td><td>${m.status_display}</td><td style="text-align:center;">${anexoHtml}</td></tr>`; });
         html += `</tbody></table>`; div.innerHTML = html;
       } catch (error) { div.innerHTML = `<div class="state-message" style="color:var(--danger-color);"><i class="fas fa-exclamation-triangle"></i><p>${error.response?.data?.error || 'Erro ao carregar'}</p></div>`; }
     }
+    
     async function exportTo(format) {
-      const params = { dataInicio: document.getElementById('dataInicio').value, dataFim: document.getElementById('dataFim').value, sala: document.getElementById('salaRelatorio').value, status: document.getElementById('statusRelatorio').value };
+      const params = { 
+        dataInicio: document.getElementById('dataInicio').value, 
+        dataFim: document.getElementById('dataFim').value, 
+        sala: document.getElementById('salaRelatorio').value, 
+        status: document.getElementById('statusRelatorio').value,
+        departamento: document.getElementById('departamentoRelatorio').value
+      };
       const endpoint = format === 'csv' ? '/meetings/exportar' : '/meetings/exportar_html';
       try {
         const res = await api.get(endpoint, { params, responseType: 'blob' });
@@ -385,6 +467,7 @@
         link.click(); document.body.removeChild(link); window.URL.revokeObjectURL(url);
       } catch (error) { alert('Não foi possível exportar o relatório.'); }
     }
+
     function exportarParaExcel() { exportTo('csv'); }
     function exportarParaHTML() { exportTo('html'); }
 
@@ -392,41 +475,77 @@
       const num = parseInt(document.getElementById('meetingParticipants').value, 10) || 0;
       document.getElementById('participantesContainer').innerHTML = Array.from({ length: num }, (_, i) => `<div class="form-group" style="margin-bottom:0.5rem;"><input type="text" id="participante_${i+1}" placeholder="Nome do participante ${i+1}" /></div>`).join('');
     }
+
     async function loadDepartments() {
       try {
         const { data: depts } = await api.get('/departments'); departments = depts;
-        document.getElementById('meetingDepartment').innerHTML = '<option value="">Selecione...</option>' + departments.map(d => `<option value="${d.id}">${d.name}</option>`).join('');
+        const optionsHtml = depts.map(d => `<option value="${d.id}">${d.name}</option>`).join('');
+        document.getElementById('meetingDepartment').innerHTML = '<option value="">Selecione...</option>' + optionsHtml;
+        if (currentUser.user_type === 'admin') {
+            document.getElementById('departamentoRelatorio').innerHTML = '<option value="todos">Todos</option>' + optionsHtml;
+        }
       } catch (error) { console.error('Erro ao carregar departamentos:', error); }
     }
 
     async function checkForUpcomingMeetings() {
-        if (currentUser.user_type !== 'admin') return;
+        if (!currentUser || currentUser.user_type === 'viewer') return;
         try {
             const { data } = await api.get('/meetings');
             const now = new Date();
             data.forEach(m => {
-                if (m.computed_status === 'pendente' || m.computed_status === 'em_andamento') {
+                if (m.computed_status === 'pendente') {
                     const start = new Date(`${m.date}T${m.start_time}`);
                     const diffMinutes = (start.getTime() - now.getTime()) / 60000;
-                    if (diffMinutes > 4.5 && diffMinutes <= 5.5) { // Alerta 5 minutos antes
+                    if (diffMinutes > 4.5 && diffMinutes <= 5.5) { 
                         if (Notification.permission === 'granted') {
                             new Notification('Reunião Começando!', {
                                 body: `A reunião "${m.subject}" na ${m.room_location === 'baixo' ? 'Sala de Baixo' : 'Sala de Cima'} começa em 5 minutos.`,
                                 icon: 'logo.png'
                             });
                         } else if (Notification.permission !== 'denied') {
-                            Notification.requestPermission().then(p => { if (p === 'granted') { /* Tente de novo no próximo ciclo */ } });
+                            Notification.requestPermission().then(p => { if (p === 'granted') {} });
                         }
                     }
                 }
             });
         } catch (error) { console.error("Erro ao verificar reuniões", error); }
     }
+    
+    function displayFileName(currentFile = null, isExisting = false) {
+        const fileInput = document.getElementById('meetingFile');
+        const fileNameDisplay = document.getElementById('fileNameDisplay');
+        const fileUploadText = document.getElementById('fileUploadText');
+        const file = fileInput.files[0];
+
+        if (file) {
+            fileNameDisplay.textContent = `Arquivo selecionado: ${file.name}`;
+            fileUploadText.textContent = 'Trocar arquivo';
+        } else if (isExisting) {
+            fileNameDisplay.textContent = `Arquivo atual: ${currentFile}`;
+            fileUploadText.textContent = 'Substituir arquivo';
+        } else {
+            fileNameDisplay.textContent = '';
+            fileUploadText.textContent = 'Clique para selecionar um arquivo';
+        }
+    }
 
     function formatDate(dateStr) { return new Date(dateStr + 'T00:00:00').toLocaleDateString('pt-BR'); }
+    
+    async function downloadAttachment(meetingId) {
+      try {
+        const res = await api.get(`/meetings/${meetingId}/attachment`, { responseType: 'blob' });
+        const url = window.URL.createObjectURL(new Blob([res.data], { type: res.headers['content-type'] }));
+        window.open(url, '_blank');
+        setTimeout(() => window.URL.revokeObjectURL(url), 100);
+      } catch (error) {
+        console.error('Erro ao visualizar/baixar anexo:', error);
+        alert('Não foi possível obter o anexo. Você pode não ter permissão ou o arquivo foi removido.');
+      }
+    }
+
     window.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeMeetingModal(); });
     window.addEventListener('click', (e) => { if (e.target == document.getElementById('meetingModal')) closeMeetingModal(); });
-    setInterval(loadMeetings, 30000); // Atualiza reuniões a cada 30 segundos
+    setInterval(loadMeetings, 30000);
 </script>
 </body>
 </html>
