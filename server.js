@@ -6,6 +6,7 @@ const cors = require('cors');
 const path = require('path');
 const multer = require('multer');
 const fs = require('fs');
+const os = require('os');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -69,11 +70,11 @@ db.serialize(() => {
     if (err) return;
     const users = [
       { username: 'admin', password: 'admin123', name: 'Administrador', user_type: 'admin' },
-      { username: 'departamento_pessoal', password: 'senha123', name: 'Departamento Pessoal', user_type: 'department' },
-      { username: 'departamento_legalizacao', password: 'senha123', name: 'Departamento Legalização', user_type: 'department' },
-      { username: 'departamento_contabil', password: 'senha123', name: 'Departamento Contábil', user_type: 'department' },
-      { username: 'departamento_financeiro', password: 'senha123', name: 'Departamento Financeiro', user_type: 'department' },
-      { username: 'departamento_fiscal', password: 'senha123', name: 'Departamento Fiscal', user_type: 'department' }
+      { username: 'departamento_pessoal', password: 'pessoal123', name: 'Departamento Pessoal', user_type: 'department' },
+      { username: 'departamento_legalizacao', password: 'legalizacao123', name: 'Departamento Legalização', user_type: 'department' },
+      { username: 'departamento_contabil', password: 'contabil123', name: 'Departamento Contábil', user_type: 'department' },
+      { username: 'departamento_financeiro', password: 'financeiro123', name: 'Departamento Financeiro', user_type: 'department' },
+      { username: 'departamento_fiscal', password: 'fiscal123', name: 'Departamento Fiscal', user_type: 'department' }
     ];
     const stmt = db.prepare(`INSERT OR IGNORE INTO users (username, password, name, user_type) VALUES (?, ?, ?, ?);`);
     users.forEach(user => {
@@ -133,10 +134,8 @@ app.get('/api/departments', authenticateToken, (req, res) => {
   res.json(departmentsList);
 });
 
-// ✨ ROTA CORRIGIDA: Lógica de filtragem prematura no SQL foi removida. ✨
 app.get('/api/meetings', authenticateToken, (req, res) => {
   const { statusFiltro } = req.query;
-  // A query agora busca TODAS as reuniões, como deveria.
   const query = `SELECT m.*, u.name as organizer_name FROM meetings m JOIN users u ON m.organizer_id = u.id WHERE m.status != 'excluida' ORDER BY m.date, m.start_time;`;
   
   db.all(query, [], (err, meetings) => {
@@ -160,24 +159,19 @@ app.get('/api/meetings', authenticateToken, (req, res) => {
         processedMeetings = processedMeetings.filter(m => m.computed_status === statusFiltro);
     }
     
-    // A lógica de privacidade em JavaScript agora funciona corretamente, pois recebe todas as reuniões.
     const finalMeetings = processedMeetings.map(meeting => {
         const user = req.user;
-
         if (user.user_type === 'admin') {
             return { ...meeting, department: departmentMap.get(meeting.department) || meeting.department };
         }
-
         if (user.user_type === 'department') {
             const userDepartment = user.username.split('_')[1];
             const isOwnerDepartment = userDepartment === meeting.department;
             const isOrganizer = user.id === meeting.organizer_id;
-
             if (isOwnerDepartment || isOrganizer) {
                 return { ...meeting, department: departmentMap.get(meeting.department) || meeting.department };
             }
         }
-        
         return {
             ...meeting,
             subject: 'Reservado',
@@ -417,6 +411,37 @@ app.get('/api/meetings/:id/attachment', authenticateToken, (req, res) => {
   });
 });
 
+app.post('/api/meetings/:id/attachment', authenticateToken, canManageMeetings, upload.single('attachment'), (req, res) => {
+    const { id } = req.params;
+
+    if (!req.file) {
+        return res.status(400).json({ error: 'Nenhum arquivo enviado.' });
+    }
+
+    db.get('SELECT file_path FROM meetings WHERE id = ?', [id], (err, meeting) => {
+        if (err) {
+            return res.status(500).json({ error: 'Erro ao buscar dados da reunião.' });
+        }
+        if (!meeting) {
+            return res.status(404).json({ error: 'Reunião não encontrada.' });
+        }
+
+        if (meeting.file_path) {
+            fs.unlink(path.join(__dirname, meeting.file_path), (unlinkErr) => {
+                if (unlinkErr) console.error("Erro ao deletar anexo antigo:", unlinkErr);
+            });
+        }
+
+        const newFilePath = req.file.path;
+        db.run('UPDATE meetings SET file_path = ? WHERE id = ?', [newFilePath, id], function(updateErr) {
+            if (updateErr) {
+                return res.status(500).json({ error: 'Erro ao salvar o anexo no banco de dados.' });
+            }
+            res.json({ message: 'Ata da reunião anexada com sucesso!' });
+        });
+    });
+});
+
 app.put('/api/meetings/:id/cancel', authenticateToken, canManageMeetings, (req, res) => {
   const { id } = req.params;
   db.run(`UPDATE meetings SET status = 'cancelada' WHERE id = ? AND status = 'pendente';`, [id], function(err) {
@@ -438,7 +463,36 @@ app.delete('/api/meetings/:id', authenticateToken, isAdmin, (req, res) => {
 app.get('/api/verify', authenticateToken, (req, res) => res.json({ user: req.user }));
 app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 
-const server = app.listen(PORT, '0.0.0.0', () => console.log(`Servidor rodando na porta ${PORT}`));
+const server = app.listen(PORT, '0.0.0.0', () => {
+    console.log(`Servidor rodando na porta ${PORT}`);
+    
+    const getNetworkAddresses = () => {
+        const interfaces = os.networkInterfaces();
+        const addresses = [];
+        for (const name of Object.keys(interfaces)) {
+            for (const iface of interfaces[name]) {
+                if ('IPv4' !== iface.family || iface.internal !== false) {
+                    continue;
+                }
+                addresses.push(iface.address);
+            }
+        }
+        return addresses;
+    };
+
+    const networkIps = getNetworkAddresses();
+    console.log('\n---');
+    console.log('Acesse o sistema em um dos seguintes endereços:');
+    console.log(`  - No seu computador: http://localhost:${PORT}`);
+    if (networkIps.length > 0) {
+        networkIps.forEach(ip => {
+            console.log(`  - Em outros computadores na mesma rede: http://${ip}:${PORT}`);
+        });
+    }
+    console.log(`  - URL Personalizada (requer configuração do arquivo 'hosts'): http://salas-de-reunioes-HDL:${PORT}`);
+    console.log('---\n');
+});
+
 process.on('SIGINT', () => {
   server.close(() => { db.close(); process.exit(0); });
 });

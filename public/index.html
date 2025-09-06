@@ -72,9 +72,9 @@
     .meeting-details-list li strong { color: var(--text-color); }
     .meeting-actions-container { display: flex; align-items: center; gap: 10px; }
     .status-badge { font-size: 0.8em; font-weight: bold; padding: 6px 12px; border-radius: 20px; color: white; text-transform: uppercase; }
-    .actions-group { display: flex; background-color: var(--primary-color); border-radius: 20px; overflow: hidden; }
-    .actions-group button { background: transparent; border: none; color: var(--dark-bg); padding: 8px 10px; cursor: pointer; transition: background-color 0.2s; font-size: 14px; }
-    .actions-group button:hover { background-color: rgba(0,0,0,0.2); }
+    .actions-group { display: flex; background-color: var(--border-color); border-radius: 20px; overflow: hidden; }
+    .actions-group button { background: transparent; border: none; color: var(--primary-color); padding: 8px 10px; cursor: pointer; transition: background-color 0.2s; font-size: 14px; }
+    .actions-group button:hover { background-color: rgba(255, 255, 255, 0.1); }
     .btn-delete-icon { background: var(--danger-color); color: white; border: none; border-radius: 50%; width: 32px; height: 32px; cursor: pointer; display: flex; align-items: center; justify-content: center; }
     .attachment-link { color: white; text-decoration: none; cursor: pointer; }
     .attachment-link:hover { text-decoration: underline; }
@@ -86,7 +86,7 @@
     }
     .file-upload-label:hover { border-color: var(--primary-color); color: var(--primary-color); }
     .file-upload-label i { margin-right: 10px; }
-    #fileNameDisplay { margin-top: 8px; font-size: 13px; color: var(--primary-color); text-align: center; }
+    #fileNameDisplay, #ataFileNameDisplay { margin-top: 8px; font-size: 13px; color: var(--primary-color); text-align: center; }
   </style>
 </head>
 <body>
@@ -188,6 +188,33 @@
     </div>
   </div>
 
+  <div id="attachmentModal" class="modal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2 id="attachmentModalTitle">Anexar Ata da Reunião</h2>
+        <span class="close" onclick="closeAttachmentModal()" style="cursor:pointer;font-size:28px;">&times;</span>
+      </div>
+      <form id="attachmentForm" onsubmit="event.preventDefault(); saveAttachment();">
+        <input type="hidden" id="ataMeetingId">
+        <div class="form-group">
+            <label for="ataFile">Arquivo (.doc, .docx, máx: 20MB)</label>
+            <label for="ataFile" class="file-upload-label" id="ataFileUploadLabel">
+                <i class="fas fa-cloud-upload-alt"></i>
+                <span id="ataFileUploadText">Clique para selecionar um arquivo</span>
+            </label>
+            <input type="file" id="ataFile" accept=".doc,.docx,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document" onchange="displayAtaFileName()">
+            <div id="ataFileNameDisplay"></div>
+        </div>
+        <div style="display: flex; gap: 10px; margin-top: 20px;">
+          <button type="submit" class="btn btn-primary">Salvar Anexo</button>
+          <button type="button" class="btn" style="background-color: #555; color: white;" onclick="closeAttachmentModal()">Cancelar</button>
+        </div>
+        <div id="ataError" class="error"></div>
+      </form>
+    </div>
+  </div>
+
+
 <script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.8/index.global.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.8/locales-all.global.min.js"></script>
 <script>
@@ -249,7 +276,6 @@
         if (tabId === 'salas') loadMeetings();
     }
     
-    // ✨ FUNÇÃO DO CALENDÁRIO ATUALIZADA ✨
     function initCalendar() {
       if (calendar) calendar.destroy();
       calendar = new FullCalendar.Calendar(document.getElementById('calendar'), {
@@ -261,7 +287,6 @@
             successCallback(res.data.map(m => {
                 const isReserved = m.subject === 'Reservado';
                 const eventTitle = isReserved ? 'Reservado' : m.subject + (m.file_path ? ' 📎' : '');
-
                 return {
                     id: m.id,
                     title: eventTitle,
@@ -277,13 +302,11 @@
         },
         eventClick: (info) => {
           const props = info.event.extendedProps;
-          
           if (props.subject === 'Reservado') {
             const msg = `Horário Reservado - Entre ${props.start_time} e ${props.end_time}`;
             alert(msg);
             return;
           }
-          
           let msg = `Assunto: ${props.subject}\nSala: ${props.room_location === 'baixo' ? 'Sala de Baixo' : 'Sala de Cima'}\nDepto: ${props.department}\nHorário: ${props.start_time} - ${props.end_time}\nOrganizador: ${props.organizer_name}\nParticipantes: ${props.participants_names || 'N/A'}`;
           if (props.file_path) { msg += `\n\nUm anexo está disponível para esta reunião.` }
           alert(msg);
@@ -296,7 +319,6 @@
         try {
             const statusFiltro = document.getElementById('statusFiltro').value;
             const { data } = await api.get('/meetings', { params: { statusFiltro } });
-            // A Aba Salas continua usando a mesma função, que vai renderizar os dados que o servidor mandar
             renderMeetingsInContainer(document.getElementById('meetingsBaixo'), data.filter(m => m.room_location === 'baixo'));
             renderMeetingsInContainer(document.getElementById('meetingsCima'), data.filter(m => m.room_location === 'cima'));
             if (calendar) calendar.refetchEvents();
@@ -307,7 +329,6 @@
         }
     }
 
-    // A renderização da Aba Salas não foi alterada
     function renderMeetingsInContainer(container, meetings) {
         if (!meetings || meetings.length === 0) {
             container.innerHTML = '<div class="state-message"><i class="far fa-calendar-check"></i><p>Nenhuma reunião encontrada.</p></div>'; return;
@@ -321,9 +342,14 @@
             if (!isReserved) {
                 const status = m.computed_status;
                 if (status === 'pendente' || status === 'em_andamento') {
-                    actionsHtml = `<div class="actions-group" style="background-color: ${statusInfo.color};">
+                    actionsHtml = `<div class="actions-group">
                         <button title="Editar" onclick="openMeetingModal(null, ${m.id})"><i class="fas fa-pen"></i></button>
                         ${status === 'pendente' ? `<button title="Cancelar" onclick="cancelMeeting(${m.id})"><i class="fas fa-ban"></i></button>` : ''}
+                        ${canAdmin ? `<button title="Excluir" onclick="deleteMeeting(${m.id})"><i class="fas fa-trash"></i></button>` : ''}
+                    </div>`;
+                } else if (status === 'concluida') {
+                    actionsHtml = `<div class="actions-group">
+                        <button title="Anexar Ata" onclick="openAttachmentModal(${m.id})"><i class="fas fa-paperclip"></i></button>
                         ${canAdmin ? `<button title="Excluir" onclick="deleteMeeting(${m.id})"><i class="fas fa-trash"></i></button>` : ''}
                     </div>`;
                 } else {
@@ -359,42 +385,60 @@
 
     async function openMeetingModal(room, meetingId = null) {
       currentMeetingId = meetingId;
-      document.getElementById('meetingForm').reset(); document.getElementById('participantesContainer').innerHTML = ''; document.getElementById('meetingError').textContent = '';
+      document.getElementById('meetingForm').reset();
+      document.getElementById('participantesContainer').innerHTML = '';
+      document.getElementById('meetingError').textContent = '';
       displayFileName();
       const deptSelect = document.getElementById('meetingDepartment');
       deptSelect.disabled = currentUser.user_type === 'department';
-      if(currentUser.user_type === 'department') {
+      if (currentUser.user_type === 'department') {
           deptSelect.value = currentUser.username.split('_')[1];
       }
       try {
         if (meetingId) {
             document.getElementById('modalTitle').textContent = 'Editar Reunião';
             const { data: m } = await api.get(`/meetings/${meetingId}`);
-            document.getElementById('meetingRoom').value = m.room_location; document.getElementById('meetingDepartment').value = m.department;
-            document.getElementById('meetingDate').value = m.date; document.getElementById('meetingStartTime').value = m.start_time;
-            document.getElementById('meetingEndTime').value = m.end_time; document.getElementById('meetingSubject').value = m.subject;
-            document.getElementById('meetingParticipants').value = m.participants; gerarCamposParticipantes();
-            if (m.participants_names) { m.participants_names.split(',').forEach((n, i) => { const el = document.getElementById(`participante_${i+1}`); if(el) el.value = n.trim(); }); }
+            document.getElementById('meetingRoom').value = m.room_location;
+            document.getElementById('meetingDepartment').value = m.department;
+            document.getElementById('meetingDate').value = m.date;
+            document.getElementById('meetingStartTime').value = m.start_time;
+            document.getElementById('meetingEndTime').value = m.end_time;
+            document.getElementById('meetingSubject').value = m.subject;
+            document.getElementById('meetingParticipants').value = m.participants;
+            gerarCamposParticipantes();
+            if (m.participants_names) {
+                m.participants_names.split(',').forEach((n, i) => {
+                    const el = document.getElementById(`participante_${i+1}`);
+                    if (el) el.value = n.trim();
+                });
+            }
             if (m.file_path) {
                 const fileName = m.file_path.split('-').slice(2).join('-');
                 displayFileName(fileName, true);
             }
         } else {
-            document.getElementById('modalTitle').textContent = 'Nova Reunião'; document.getElementById('meetingRoom').value = room;
+            document.getElementById('modalTitle').textContent = 'Nova Reunião';
+            document.getElementById('meetingRoom').value = room;
             document.getElementById('meetingDate').valueAsDate = new Date();
         }
         document.getElementById('meetingModal').style.display = 'block';
-      } catch(error) { alert('Não foi possível carregar os dados da reunião.'); }
+      } catch(error) {
+        alert('Não foi possível carregar os dados da reunião.');
+      }
     }
 
-    function closeMeetingModal() { document.getElementById('meetingModal').style.display = 'none'; }
+    function closeMeetingModal() {
+      document.getElementById('meetingModal').style.display = 'none';
+    }
 
     async function saveMeeting() {
-      const errDiv = document.getElementById('meetingError'); errDiv.textContent = '';
+      const errDiv = document.getElementById('meetingError');
+      errDiv.textContent = '';
       const fileInput = document.getElementById('meetingFile');
       const file = fileInput.files[0];
       if (file && file.size > 20 * 1024 * 1024) {
-          errDiv.textContent = 'O arquivo excede o limite de 20MB.'; return;
+          errDiv.textContent = 'O arquivo excede o limite de 20MB.';
+          return;
       }
       const formData = new FormData();
       formData.append('room_location', document.getElementById('meetingRoom').value);
@@ -408,14 +452,24 @@
       if (file) {
           formData.append('attachment', file);
       }
-      if (!formData.get('subject') || !formData.get('date') || !formData.get('start_time') || !formData.get('end_time') || !formData.get('department')) { errDiv.textContent = 'Preencha todos os campos obrigatórios.'; return; }
-      if (formData.get('start_time') >= formData.get('end_time')) { errDiv.textContent = 'O horário de término deve ser após o de início.'; return; }
-      if (formData.get('start_time') < "08:00" || formData.get('end_time') > "18:00") { errDiv.textContent = 'As reuniões devem ocorrer entre 08:00 e 18:00.'; return; }
+      if (!formData.get('subject') || !formData.get('date') || !formData.get('start_time') || !formData.get('end_time') || !formData.get('department')) {
+          errDiv.textContent = 'Preencha todos os campos obrigatórios.';
+          return;
+      }
+      if (formData.get('start_time') >= formData.get('end_time')) {
+          errDiv.textContent = 'O horário de término deve ser após o de início.';
+          return;
+      }
+      // ✨ VALIDAÇÃO DE HORÁRIO REMOVIDA DAQUI ✨
       try {
-        const method = currentMeetingId ? 'put' : 'post'; const url = currentMeetingId ? `/meetings/${currentMeetingId}` : '/meetings';
+        const method = currentMeetingId ? 'put' : 'post';
+        const url = currentMeetingId ? `/meetings/${currentMeetingId}` : '/meetings';
         await api[method](url, formData, { headers: { 'Content-Type': 'multipart/form-data' } });
-        closeMeetingModal(); loadMeetings();
-      } catch (error) { errDiv.textContent = error.response?.data?.error || 'Ocorreu um erro ao salvar.'; }
+        closeMeetingModal();
+        loadMeetings();
+      } catch (error) {
+        errDiv.textContent = error.response?.data?.error || 'Ocorreu um erro ao salvar.';
+      }
     }
     
     async function cancelMeeting(id) {
@@ -431,7 +485,8 @@
     }
 
     async function carregarDadosRelatorio() {
-      const div = document.getElementById('resultadoRelatorio'); div.innerHTML = `<div class="state-message"><i class="fas fa-spinner fa-spin"></i><p>Carregando...</p></div>`;
+      const div = document.getElementById('resultadoRelatorio');
+      div.innerHTML = `<div class="state-message"><i class="fas fa-spinner fa-spin"></i><p>Carregando...</p></div>`;
       try {
         const params = { 
             dataInicio: document.getElementById('dataInicio').value, 
@@ -441,13 +496,20 @@
             departamento: document.getElementById('departamentoRelatorio').value
         };
         const { data: meetings } = await api.get('/meetings/historico', { params });
-        if (!meetings || meetings.length === 0) { div.innerHTML = `<div class="state-message"><i class="fas fa-table"></i><p>Nenhuma reunião encontrada.</p></div>`; return; }
+        if (!meetings || meetings.length === 0) {
+            div.innerHTML = `<div class="state-message"><i class="fas fa-table"></i><p>Nenhuma reunião encontrada.</p></div>`;
+            return;
+        }
         let html = `<p style="margin-bottom: 15px;">${meetings.length} reuniões encontradas.</p><table class="tabela-relatorio"><thead><tr><th>Data</th><th>Horário</th><th>Sala</th><th>Depto</th><th>Assunto</th><th>Organizador</th><th>Participantes</th><th>Status</th><th>Anexo</th></tr></thead><tbody>`;
         meetings.forEach(m => { 
           const anexoHtml = m.file_path ? `<a href="#" onclick="event.preventDefault(); downloadAttachment(${m.id})" title="Visualizar anexo">📎</a>` : '-';
-          html += `<tr><td>${formatDate(m.date)}</td><td>${m.start_time} - ${m.end_time}</td><td>${m.room_location === 'baixo' ? 'S. Baixo' : 'S. Cima'}</td><td>${m.department}</td><td>${m.subject}</td><td>${m.organizer_name}</td><td>${m.participants_names||'-'}</td><td>${m.status_display}</td><td style="text-align:center;">${anexoHtml}</td></tr>`; });
-        html += `</tbody></table>`; div.innerHTML = html;
-      } catch (error) { div.innerHTML = `<div class="state-message" style="color:var(--danger-color);"><i class="fas fa-exclamation-triangle"></i><p>${error.response?.data?.error || 'Erro ao carregar'}</p></div>`; }
+          html += `<tr><td>${formatDate(m.date)}</td><td>${m.start_time} - ${m.end_time}</td><td>${m.room_location === 'baixo' ? 'S. Baixo' : 'S. Cima'}</td><td>${m.department}</td><td>${m.subject}</td><td>${m.organizer_name}</td><td>${m.participants_names||'-'}</td><td>${m.status_display}</td><td style="text-align:center;">${anexoHtml}</td></tr>`;
+        });
+        html += `</tbody></table>`;
+        div.innerHTML = html;
+      } catch (error) {
+        div.innerHTML = `<div class="state-message" style="color:var(--danger-color);"><i class="fas fa-exclamation-triangle"></i><p>${error.response?.data?.error || 'Erro ao carregar'}</p></div>`;
+      }
     }
     
     async function exportTo(format) {
@@ -461,11 +523,18 @@
       const endpoint = format === 'csv' ? '/meetings/exportar' : '/meetings/exportar_html';
       try {
         const res = await api.get(endpoint, { params, responseType: 'blob' });
-        const url = window.URL.createObjectURL(new Blob([res.data])); const link = document.createElement('a');
-        link.href = url; const today = new Date().toISOString().split('T')[0];
-        link.setAttribute('download', `relatorio_reunioes_${today}.${format}`); document.body.appendChild(link);
-        link.click(); document.body.removeChild(link); window.URL.revokeObjectURL(url);
-      } catch (error) { alert('Não foi possível exportar o relatório.'); }
+        const url = window.URL.createObjectURL(new Blob([res.data]));
+        const link = document.createElement('a');
+        link.href = url;
+        const today = new Date().toISOString().split('T')[0];
+        link.setAttribute('download', `relatorio_reunioes_${today}.${format}`);
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        window.URL.revokeObjectURL(url);
+      } catch (error) {
+        alert('Não foi possível exportar o relatório.');
+      }
     }
 
     function exportarParaExcel() { exportTo('csv'); }
@@ -478,13 +547,16 @@
 
     async function loadDepartments() {
       try {
-        const { data: depts } = await api.get('/departments'); departments = depts;
+        const { data: depts } = await api.get('/departments');
+        departments = depts;
         const optionsHtml = depts.map(d => `<option value="${d.id}">${d.name}</option>`).join('');
         document.getElementById('meetingDepartment').innerHTML = '<option value="">Selecione...</option>' + optionsHtml;
         if (currentUser.user_type === 'admin') {
             document.getElementById('departamentoRelatorio').innerHTML = '<option value="todos">Todos</option>' + optionsHtml;
         }
-      } catch (error) { console.error('Erro ao carregar departamentos:', error); }
+      } catch (error) {
+        console.error('Erro ao carregar departamentos:', error);
+      }
     }
 
     async function checkForUpcomingMeetings() {
@@ -496,7 +568,7 @@
                 if (m.computed_status === 'pendente') {
                     const start = new Date(`${m.date}T${m.start_time}`);
                     const diffMinutes = (start.getTime() - now.getTime()) / 60000;
-                    if (diffMinutes > 4.5 && diffMinutes <= 5.5) { 
+                    if (diffMinutes > 4.5 && diffMinutes <= 5.5) {
                         if (Notification.permission === 'granted') {
                             new Notification('Reunião Começando!', {
                                 body: `A reunião "${m.subject}" na ${m.room_location === 'baixo' ? 'Sala de Baixo' : 'Sala de Cima'} começa em 5 minutos.`,
@@ -508,7 +580,9 @@
                     }
                 }
             });
-        } catch (error) { console.error("Erro ao verificar reuniões", error); }
+        } catch (error) {
+            console.error("Erro ao verificar reuniões", error);
+        }
     }
     
     function displayFileName(currentFile = null, isExisting = false) {
@@ -529,7 +603,9 @@
         }
     }
 
-    function formatDate(dateStr) { return new Date(dateStr + 'T00:00:00').toLocaleDateString('pt-BR'); }
+    function formatDate(dateStr) {
+      return new Date(dateStr + 'T00:00:00').toLocaleDateString('pt-BR');
+    }
     
     async function downloadAttachment(meetingId) {
       try {
@@ -543,8 +619,74 @@
       }
     }
 
-    window.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeMeetingModal(); });
-    window.addEventListener('click', (e) => { if (e.target == document.getElementById('meetingModal')) closeMeetingModal(); });
+    function openAttachmentModal(meetingId) {
+        document.getElementById('ataMeetingId').value = meetingId;
+        document.getElementById('attachmentForm').reset();
+        displayAtaFileName();
+        document.getElementById('ataError').textContent = '';
+        document.getElementById('attachmentModal').style.display = 'block';
+    }
+
+    function closeAttachmentModal() {
+        document.getElementById('attachmentModal').style.display = 'none';
+    }
+
+    async function saveAttachment() {
+        const errDiv = document.getElementById('ataError');
+        errDiv.textContent = '';
+        
+        const meetingId = document.getElementById('ataMeetingId').value;
+        const fileInput = document.getElementById('ataFile');
+        const file = fileInput.files[0];
+
+        if (!file) {
+            errDiv.textContent = 'Por favor, selecione um arquivo.';
+            return;
+        }
+        if (file.size > 20 * 1024 * 1024) {
+            errDiv.textContent = 'O arquivo excede o limite de 20MB.';
+            return;
+        }
+
+        const formData = new FormData();
+        formData.append('attachment', file);
+
+        try {
+            await api.post(`/meetings/${meetingId}/attachment`, formData, {
+                headers: { 'Content-Type': 'multipart/form-data' }
+            });
+            closeAttachmentModal();
+            loadMeetings();
+        } catch (error) {
+            errDiv.textContent = error.response?.data?.error || 'Ocorreu um erro ao enviar o anexo.';
+        }
+    }
+
+    function displayAtaFileName() {
+        const fileInput = document.getElementById('ataFile');
+        const fileNameDisplay = document.getElementById('ataFileNameDisplay');
+        const fileUploadText = document.getElementById('ataFileUploadText');
+        const file = fileInput.files[0];
+
+        if (file) {
+            fileNameDisplay.textContent = `Arquivo selecionado: ${file.name}`;
+            fileUploadText.textContent = 'Trocar arquivo';
+        } else {
+            fileNameDisplay.textContent = '';
+            fileUploadText.textContent = 'Clique para selecionar um arquivo';
+        }
+    }
+
+    window.addEventListener('keydown', (e) => { 
+        if (e.key === 'Escape') {
+            closeMeetingModal(); 
+            closeAttachmentModal();
+        }
+    });
+    window.addEventListener('click', (e) => { 
+        if (e.target == document.getElementById('meetingModal')) closeMeetingModal(); 
+        if (e.target == document.getElementById('attachmentModal')) closeAttachmentModal(); 
+    });
     setInterval(loadMeetings, 30000);
 </script>
 </body>
