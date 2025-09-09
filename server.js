@@ -51,7 +51,10 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 const db = new sqlite3.Database('./meetings.db', (err) => {
   if (err) console.error('Erro ao conectar ao banco de dados:', err.message);
-  else console.log('Conectado ao banco de dados SQLite');
+  else {
+    console.log('Conectado ao banco de dados SQLite');
+    db.run('PRAGMA foreign_keys = ON;'); // Ativa as chaves estrangeiras
+  }
 });
 
 // --- Definição dos Departamentos ---
@@ -91,7 +94,14 @@ db.serialize(() => {
     department TEXT NOT NULL, participants INTEGER NOT NULL, participants_names TEXT,
     file_path TEXT,
     status TEXT NOT NULL DEFAULT 'pendente', created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (organizer_id) REFERENCES users(id)
+    FOREIGN KEY (organizer_id) REFERENCES users(id) ON DELETE CASCADE
+  );`);
+  
+  db.run(`CREATE TABLE IF NOT EXISTS meeting_shares (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    meeting_id INTEGER NOT NULL,
+    department TEXT NOT NULL,
+    FOREIGN KEY (meeting_id) REFERENCES meetings(id) ON DELETE CASCADE
   );`);
 });
 
@@ -136,7 +146,18 @@ app.get('/api/departments', authenticateToken, (req, res) => {
 
 app.get('/api/meetings', authenticateToken, (req, res) => {
   const { statusFiltro } = req.query;
-  const query = `SELECT m.*, u.name as organizer_name FROM meetings m JOIN users u ON m.organizer_id = u.id WHERE m.status != 'excluida' ORDER BY m.date, m.start_time;`;
+  const query = `
+    SELECT 
+      m.*, 
+      u.name as organizer_name, 
+      GROUP_CONCAT(s.department) as shared_with
+    FROM meetings m 
+    JOIN users u ON m.organizer_id = u.id 
+    LEFT JOIN meeting_shares s ON m.id = s.meeting_id
+    WHERE m.status != 'excluida'
+    GROUP BY m.id
+    ORDER BY m.date, m.start_time;
+  `;
   
   db.all(query, [], (err, meetings) => {
     if (err) return res.status(500).json({ error: 'Erro ao carregar reuniões' });
@@ -146,13 +167,10 @@ app.get('/api/meetings', authenticateToken, (req, res) => {
         const startDateTime = new Date(`${m.date}T${m.start_time}`);
         const endDateTime = new Date(`${m.date}T${m.end_time}`);
         let computed_status = 'pendente';
-
         if (m.status === 'cancelada') computed_status = 'cancelada';
-        else if (m.status === 'excluida') computed_status = 'excluida';
         else if (now >= startDateTime && now <= endDateTime) computed_status = 'em_andamento';
         else if (now > endDateTime) computed_status = 'concluida';
-        
-        return { ...m, computed_status };
+        return { ...m, computed_status, shared_with: m.shared_with ? m.shared_with.split(',') : [] };
     });
 
     if (statusFiltro) {
@@ -168,7 +186,9 @@ app.get('/api/meetings', authenticateToken, (req, res) => {
             const userDepartment = user.username.split('_')[1];
             const isOwnerDepartment = userDepartment === meeting.department;
             const isOrganizer = user.id === meeting.organizer_id;
-            if (isOwnerDepartment || isOrganizer) {
+            const isInvited = meeting.shared_with.includes(userDepartment);
+
+            if (isOwnerDepartment || isOrganizer || isInvited) {
                 return { ...meeting, department: departmentMap.get(meeting.department) || meeting.department };
             }
         }
@@ -201,8 +221,13 @@ function getStatusDisplay(meeting) {
 function buildReportQuery(queryParams) {
     const { dataInicio, dataFim, sala, status, departamento } = queryParams;
     let query = `
-        SELECT m.*, u.name as organizer_name
-        FROM meetings m JOIN users u ON m.organizer_id = u.id
+        SELECT 
+          m.*, 
+          u.name as organizer_name,
+          GROUP_CONCAT(s.department) as shared_with
+        FROM meetings m 
+        JOIN users u ON m.organizer_id = u.id
+        LEFT JOIN meeting_shares s ON m.id = s.meeting_id
     `;
     const conditions = [];
     const params = [];
@@ -213,7 +238,7 @@ function buildReportQuery(queryParams) {
     if (departamento && departamento !== 'todos') { conditions.push('m.department = ?'); params.push(departamento); }
     
     if (conditions.length > 0) query += ' WHERE ' + conditions.join(' AND ');
-    query += ' ORDER BY m.date DESC, m.start_time DESC;';
+    query += ' GROUP BY m.id ORDER BY m.date DESC, m.start_time DESC;';
     return { query, params, statusFilter: status };
 }
 
@@ -225,7 +250,8 @@ app.get('/api/meetings/historico', authenticateToken, isAdmin, (req, res) => {
       let meetingsWithDeptName = meetings.map(m => ({
           ...m,
           department: departmentMap.get(m.department) || m.department,
-          status_display: getStatusDisplay(m)
+          status_display: getStatusDisplay(m),
+          shared_with: m.shared_with ? m.shared_with.split(',') : []
       }));
 
       if (statusFilter && statusFilter !== 'todos') {
@@ -246,7 +272,10 @@ app.get('/api/meetings/exportar', authenticateToken, isAdmin, (req, res) => {
       if (err) return res.status(500).json({ error: 'Erro no banco de dados ao exportar' });
       
       let meetingsWithDeptName = meetings.map(m => ({
-          ...m, department: departmentMap.get(m.department) || m.department, status_display: getStatusDisplay(m)
+          ...m, 
+          department: departmentMap.get(m.department) || m.department, 
+          status_display: getStatusDisplay(m),
+          shared_with: m.shared_with ? m.shared_with.split(',') : []
       }));
       
       if (statusFilter && statusFilter !== 'todos') {
@@ -256,15 +285,17 @@ app.get('/api/meetings/exportar', authenticateToken, isAdmin, (req, res) => {
         });
       }
 
-      const headers = ['Data', 'Hora Início', 'Hora Fim', 'Sala', 'Departamento', 'Assunto', 'Organizador', 'Participantes', 'Status', 'Anexo'];
+      const headers = ['Data', 'Hora Início', 'Hora Fim', 'Sala', 'Departamento', 'Assunto', 'Organizador', 'Participantes', 'Status', 'Anexo', 'Compartilhado com'];
       let csv = headers.join(';') + '\r\n';
       meetingsWithDeptName.forEach(m => {
+          const sharedDeptNames = m.shared_with.map(id => departmentMap.get(id) || id).join(', ');
           const row = [
             m.date ? new Date(m.date + 'T00:00:00').toLocaleDateString('pt-BR') : '', m.start_time || '', m.end_time || '',
             m.room_location === 'baixo' ? 'Sala de Baixo' : 'Sala de Cima', m.department || '',
             `"${(m.subject || '').replace(/"/g, '""')}"`, `"${(m.organizer_name || '').replace(/"/g, '""')}"`,
             `"${(m.participants_names || '').replace(/"/g, '""')}"`, m.status_display || '',
-            m.file_path ? 'Sim' : 'Não'
+            m.file_path ? 'Sim' : 'Não',
+            `"${sharedDeptNames}"`
           ];
           csv += row.join(';') + '\r\n';
       });
@@ -281,7 +312,10 @@ app.get('/api/meetings/exportar_html', authenticateToken, isAdmin, (req, res) =>
         if (err) return res.status(500).json({ error: 'Erro ao exportar HTML' });
 
         let meetingsWithDeptName = meetings.map(m => ({
-            ...m, department: departmentMap.get(m.department) || m.department, status_display: getStatusDisplay(m)
+            ...m, 
+            department: departmentMap.get(m.department) || m.department, 
+            status_display: getStatusDisplay(m),
+            shared_with: m.shared_with ? m.shared_with.split(',') : []
         }));
 
         if(statusFilter && statusFilter !== 'todos'){
@@ -293,9 +327,10 @@ app.get('/api/meetings/exportar_html', authenticateToken, isAdmin, (req, res) =>
 
         let html = `
           <html lang="pt-BR"><head><meta charset="UTF-8" /><title>Relatório de Reuniões</title><style>body{font-family:Arial,sans-serif;background:#f4f4f4;color:#333;margin:20px}h2{text-align:center;color:#111}table{width:100%;border-collapse:collapse;background:white;box-shadow:0 2px 5px rgba(0,0,0,.1)}th,td{padding:12px 15px;border:1px solid #ddd;text-align:left}th{background:#222;color:#ffc107;text-transform:uppercase}tr:nth-child(even){background:#f9f9f9}tr:hover{background:#f1f1f1}</style></head>
-          <body><h2>Relatório de Reuniões</h2><table><thead><tr><th>Data</th><th>Horário</th><th>Sala</th><th>Departamento</th><th>Assunto</th><th>Organizador</th><th>Participantes</th><th>Status</th><th>Anexo</th></tr></thead><tbody>`;
+          <body><h2>Relatório de Reuniões</h2><table><thead><tr><th>Data</th><th>Horário</th><th>Sala</th><th>Departamento</th><th>Assunto</th><th>Organizador</th><th>Participantes</th><th>Status</th><th>Anexo</th><th>Compartilhado com</th></tr></thead><tbody>`;
         meetingsWithDeptName.forEach(m => {
-            html += `<tr><td>${m.date ? new Date(m.date + 'T00:00:00').toLocaleDateString('pt-BR') : ''}</td><td>${m.start_time || ''} - ${m.end_time || ''}</td><td>${m.room_location === 'baixo' ? 'Sala de Baixo' : 'Sala de Cima'}</td><td>${m.department || ''}</td><td>${m.subject || ''}</td><td>${m.organizer_name || ''}</td><td>${m.participants_names || ''}</td><td>${m.status_display || ''}</td><td>${m.file_path ? 'Sim' : 'Não'}</td></tr>`;
+            const sharedDeptNames = m.shared_with.map(id => departmentMap.get(id) || id).join(', ');
+            html += `<tr><td>${m.date ? new Date(m.date + 'T00:00:00').toLocaleDateString('pt-BR') : ''}</td><td>${m.start_time || ''} - ${m.end_time || ''}</td><td>${m.room_location === 'baixo' ? 'Sala de Baixo' : 'Sala de Cima'}</td><td>${m.department || ''}</td><td>${m.subject || ''}</td><td>${m.organizer_name || ''}</td><td>${m.participants_names || ''}</td><td>${m.status_display || ''}</td><td>${m.file_path ? 'Sim' : 'Não'}</td><td>${sharedDeptNames}</td></tr>`;
         });
         html += `</tbody></table></body></html>`;
         res.setHeader('Content-Type', 'text/html; charset=utf-8');
@@ -304,19 +339,18 @@ app.get('/api/meetings/exportar_html', authenticateToken, isAdmin, (req, res) =>
     });
 });
 
-app.get('/api/meetings/:id', authenticateToken, (req, res) => {
-  const { id } = req.params;
-  db.get(`SELECT m.* FROM meetings m WHERE m.id = ?;`, [id], (err, meeting) => {
-    if (err) return res.status(500).json({ error: 'Erro ao buscar reunião.' });
-    if (!meeting) return res.status(404).json({ error: 'Reunião não encontrada.' });
-    res.json(meeting);
-  });
+app.get('/api/meetings/:id/shares', authenticateToken, (req, res) => {
+    db.all('SELECT department FROM meeting_shares WHERE meeting_id = ?', [req.params.id], (err, rows) => {
+        if (err) return res.status(500).json({ error: 'Erro ao buscar compartilhamentos.' });
+        res.json(rows.map(r => r.department));
+    });
 });
 
+// ✨ FUNÇÃO RESTAURADA ✨
 const checkConflict = (req, res, next) => {
   const { room_location, date, start_time, end_time } = req.body;
   const meetingIdToExclude = req.params.id || -1;
-  const conflictQuery = `SELECT id FROM meetings WHERE room_location = ? AND date = ? AND id != ? AND status = 'pendente' AND start_time < ? AND end_time > ?`;
+  const conflictQuery = `SELECT id FROM meetings WHERE room_location = ? AND date = ? AND id != ? AND status IN ('pendente', 'em_andamento') AND start_time < ? AND end_time > ?`;
   db.get(conflictQuery, [room_location, date, meetingIdToExclude, end_time, start_time], (err, row) => {
     if (err) return res.status(500).json({ error: 'Erro ao verificar conflitos.' });
     if (row) return res.status(409).json({ error: 'Conflito de horário! Já existe uma reunião agendada neste período.' });
@@ -325,139 +359,154 @@ const checkConflict = (req, res, next) => {
 };
 
 app.post('/api/meetings', authenticateToken, canManageMeetings, upload.single('attachment'), checkConflict, (req, res) => {
-  const { room_location, date, start_time, end_time, subject, participants_names } = req.body;
-  
+  const { room_location, date, start_time, end_time, subject, participants_names, shared_departments } = req.body;
   const participants = parseInt(req.body.participants, 10);
   if (isNaN(participants) || participants < 1) {
     return res.status(400).json({ error: 'O número de participantes é inválido.' });
   }
-
-  const department = (req.user.user_type === 'department') 
-    ? req.user.username.split('_')[1] 
-    : req.body.department;
-    
+  const department = (req.user.user_type === 'department') ? req.user.username.split('_')[1] : req.body.department;
   const filePath = req.file ? req.file.path : null;
+  const sharedDepts = shared_departments ? JSON.parse(shared_departments) : [];
 
   db.run(`INSERT INTO meetings (room_location, date, start_time, end_time, subject, organizer_id, participants, participants_names, department, file_path) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
     [room_location, date, start_time, end_time, subject, req.user.id, participants, participants_names, department, filePath],
     function (err) {
-      if (err) {
-        console.error("Erro no DB ao criar reunião:", err.message);
-        return res.status(500).json({ error: 'Erro ao criar reunião.' });
+      if (err) return res.status(500).json({ error: 'Erro ao criar reunião.' });
+      
+      const meetingId = this.lastID;
+      if (sharedDepts.length > 0) {
+        const stmt = db.prepare(`INSERT INTO meeting_shares (meeting_id, department) VALUES (?, ?);`);
+        sharedDepts.forEach(dept => stmt.run(meetingId, dept));
+        stmt.finalize();
       }
-      res.status(201).json({ message: 'Reunião criada com sucesso!', id: this.lastID });
+      res.status(201).json({ message: 'Reunião criada com sucesso!', id: meetingId });
     }
   );
 });
 
 app.put('/api/meetings/:id', authenticateToken, canManageMeetings, upload.single('attachment'), checkConflict, (req, res) => {
   const { id } = req.params;
-  const { room_location, date, start_time, end_time, subject, participants_names } = req.body;
-  
+  const { room_location, date, start_time, end_time, subject, participants_names, shared_departments } = req.body;
   const participants = parseInt(req.body.participants, 10);
   if (isNaN(participants) || participants < 1) {
     return res.status(400).json({ error: 'O número de participantes é inválido.' });
   }
-
-  const department = (req.user.user_type === 'department')
-    ? req.user.username.split('_')[1]
-    : req.body.department;
+  const department = (req.user.user_type === 'department') ? req.user.username.split('_')[1] : req.body.department;
+  const sharedDepts = shared_departments ? JSON.parse(shared_departments) : [];
 
   db.get('SELECT file_path FROM meetings WHERE id = ?', [id], (err, meeting) => {
     if (err) return res.status(500).json({ error: 'Erro ao buscar anexo antigo.' });
-
     const newFilePath = req.file ? req.file.path : meeting.file_path;
-    
     if (req.file && meeting.file_path) {
-      fs.unlink(path.join(__dirname, meeting.file_path), (unlinkErr) => {
-        if (unlinkErr) console.error("Erro ao deletar anexo antigo:", unlinkErr);
-      });
+      fs.unlink(path.join(__dirname, meeting.file_path), () => {});
     }
 
     db.run(`UPDATE meetings SET room_location = ?, date = ?, start_time = ?, end_time = ?, subject = ?, participants = ?, participants_names = ?, department = ?, file_path = ? WHERE id = ?;`,
-      [room_location, date, start_time, end_time, subject, participants, participants_names, department, newFilePath, id], (err) => {
-        if (err) {
-          console.error("Erro no DB ao atualizar reunião:", err.message);
-          return res.status(500).json({ error: 'Erro ao atualizar reunião.' });
-        }
+      [room_location, date, start_time, end_time, subject, participants, participants_names, department, newFilePath, id], (updateErr) => {
+        if (updateErr) return res.status(500).json({ error: 'Erro ao atualizar reunião.' });
+
+        db.serialize(() => {
+          db.run('DELETE FROM meeting_shares WHERE meeting_id = ?;', [id]);
+          if (sharedDepts.length > 0) {
+            const stmt = db.prepare(`INSERT INTO meeting_shares (meeting_id, department) VALUES (?, ?);`);
+            sharedDepts.forEach(dept => stmt.run(id, dept));
+            stmt.finalize();
+          }
+        });
         res.json({ message: 'Reunião atualizada com sucesso!' });
       }
     );
   });
 });
 
-app.get('/api/meetings/:id/attachment', authenticateToken, (req, res) => {
-  const { id } = req.params;
-  db.get('SELECT * FROM meetings WHERE id = ?', [id], (err, meeting) => {
-    if (err) return res.status(500).json({ error: 'Erro no servidor.' });
-    if (!meeting || !meeting.file_path) return res.status(404).json({ error: 'Anexo não encontrado.' });
-    
-    const userDept = req.user.user_type === 'department' ? req.user.username.split('_')[1] : null;
-    const isOrganizer = req.user.id === meeting.organizer_id;
-    const isAdminUser = req.user.user_type === 'admin';
-    const isInvolvedDept = userDept && userDept === meeting.department;
-    const isParticipant = (meeting.participants_names || '').includes(req.user.name);
+app.get('/api/meetings/:id/attachment', authenticateToken, async (req, res) => {
+    const { id } = req.params;
+    db.get('SELECT m.* FROM meetings m WHERE m.id = ?', [id], (err, meeting) => {
+        if (err || !meeting || !meeting.file_path) {
+            return res.status(404).json({ error: 'Anexo não encontrado.' });
+        }
+        
+        db.all('SELECT department FROM meeting_shares WHERE meeting_id = ?', [id], (shareErr, shares) => {
+            if (shareErr) return res.status(500).json({ error: 'Erro no servidor.' });
 
-    if (isAdminUser || isOrganizer || isInvolvedDept || isParticipant) {
-      const filePath = path.join(__dirname, meeting.file_path);
-      if (fs.existsSync(filePath)) {
-        res.download(filePath);
-      } else {
-        res.status(404).json({ error: 'Arquivo físico não encontrado no servidor.' });
-      }
-    } else {
-      res.status(403).json({ error: 'Você não tem permissão para baixar este anexo.' });
-    }
+            const invitedDepts = shares.map(s => s.department);
+            const userDept = req.user.user_type === 'department' ? req.user.username.split('_')[1] : null;
+
+            const hasPermission = 
+                req.user.user_type === 'admin' ||
+                req.user.id === meeting.organizer_id ||
+                (userDept && invitedDepts.includes(userDept));
+
+            if (hasPermission) {
+                const filePath = path.join(__dirname, meeting.file_path);
+                if (fs.existsSync(filePath)) {
+                    res.download(filePath);
+                } else {
+                    res.status(404).json({ error: 'Arquivo físico não encontrado.' });
+                }
+            } else {
+                res.status(403).json({ error: 'Você não tem permissão para baixar este anexo.' });
+            }
+        });
+    });
+});
+
+app.get('/api/meetings/:id', authenticateToken, (req, res) => {
+  const { id } = req.params;
+
+  const query = `
+    SELECT 
+      m.*, 
+      u.name as organizer_name,
+      GROUP_CONCAT(s.department) as shared_with
+    FROM meetings m
+    JOIN users u ON m.organizer_id = u.id
+    LEFT JOIN meeting_shares s ON m.id = s.meeting_id
+    WHERE m.id = ?
+    GROUP BY m.id
+  `;
+
+  db.get(query, [id], (err, meeting) => {
+    if (err) return res.status(500).json({ error: 'Erro ao buscar reunião.' });
+    if (!meeting) return res.status(404).json({ error: 'Reunião não encontrada.' });
+
+    meeting.shared_with = meeting.shared_with ? meeting.shared_with.split(',') : [];
+
+    res.json(meeting);
   });
 });
 
+
+
 app.post('/api/meetings/:id/attachment', authenticateToken, canManageMeetings, upload.single('attachment'), (req, res) => {
     const { id } = req.params;
-
-    if (!req.file) {
-        return res.status(400).json({ error: 'Nenhum arquivo enviado.' });
-    }
+    if (!req.file) return res.status(400).json({ error: 'Nenhum arquivo enviado.' });
 
     db.get('SELECT file_path FROM meetings WHERE id = ?', [id], (err, meeting) => {
-        if (err) {
-            return res.status(500).json({ error: 'Erro ao buscar dados da reunião.' });
-        }
-        if (!meeting) {
-            return res.status(404).json({ error: 'Reunião não encontrada.' });
-        }
-
-        if (meeting.file_path) {
-            fs.unlink(path.join(__dirname, meeting.file_path), (unlinkErr) => {
-                if (unlinkErr) console.error("Erro ao deletar anexo antigo:", unlinkErr);
-            });
-        }
-
-        const newFilePath = req.file.path;
-        db.run('UPDATE meetings SET file_path = ? WHERE id = ?', [newFilePath, id], function(updateErr) {
-            if (updateErr) {
-                return res.status(500).json({ error: 'Erro ao salvar o anexo no banco de dados.' });
-            }
-            res.json({ message: 'Ata da reunião anexada com sucesso!' });
+        if (err || !meeting) return res.status(404).json({ error: 'Reunião não encontrada.' });
+        if (meeting.file_path) fs.unlink(path.join(__dirname, meeting.file_path), () => {});
+        
+        db.run('UPDATE meetings SET file_path = ? WHERE id = ?', [req.file.path, id], (updateErr) => {
+            if (updateErr) return res.status(500).json({ error: 'Erro ao salvar o anexo.' });
+            res.json({ message: 'Ata anexada com sucesso!' });
         });
     });
 });
 
 app.put('/api/meetings/:id/cancel', authenticateToken, canManageMeetings, (req, res) => {
-  const { id } = req.params;
-  db.run(`UPDATE meetings SET status = 'cancelada' WHERE id = ? AND status = 'pendente';`, [id], function(err) {
-      if (err) return res.status(500).json({ error: 'Erro ao cancelar reunião.' });
-      if (this.changes === 0) return res.status(404).json({ error: 'Reunião não encontrada ou já finalizada.' });
-      res.json({ message: 'Reunião cancelada com sucesso!' });
-  });
+    db.run(`UPDATE meetings SET status = 'cancelada' WHERE id = ? AND status = 'pendente';`, [req.params.id], function(err) {
+        if (err) return res.status(500).json({ error: 'Erro ao cancelar reunião.' });
+        if (this.changes === 0) return res.status(404).json({ error: 'Reunião não encontrada ou já finalizada.' });
+        res.json({ message: 'Reunião cancelada com sucesso!' });
+    });
 });
 
 app.delete('/api/meetings/:id', authenticateToken, isAdmin, (req, res) => {
-  const { id } = req.params;
-  db.run(`UPDATE meetings SET status = 'excluida' WHERE id = ?;`, [id], function (err) {
-    if (err) return res.status(500).json({ error: 'Erro ao excluir reunião.' });
-    if (this.changes === 0) return res.status(404).json({ error: 'Reunião não encontrada.' });
-    res.json({ message: 'Reunião marcada como excluída!' });
-  });
+    db.run(`UPDATE meetings SET status = 'excluida' WHERE id = ?;`, [req.params.id], function (err) {
+        if (err) return res.status(500).json({ error: 'Erro ao excluir reunião.' });
+        if (this.changes === 0) return res.status(404).json({ error: 'Reunião não encontrada.' });
+        res.json({ message: 'Reunião marcada como excluída!' });
+    });
 });
 
 app.get('/api/verify', authenticateToken, (req, res) => res.json({ user: req.user }));
@@ -465,34 +514,15 @@ app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.ht
 
 const server = app.listen(PORT, '0.0.0.0', () => {
     console.log(`Servidor rodando na porta ${PORT}`);
-    
-    const getNetworkAddresses = () => {
-        const interfaces = os.networkInterfaces();
-        const addresses = [];
-        for (const name of Object.keys(interfaces)) {
-            for (const iface of interfaces[name]) {
-                if ('IPv4' !== iface.family || iface.internal !== false) {
-                    continue;
-                }
-                addresses.push(iface.address);
+    const interfaces = os.networkInterfaces();
+    Object.keys(interfaces).forEach(name => {
+        interfaces[name].forEach(iface => {
+            if ('IPv4' === iface.family && !iface.internal) {
+                console.log(`  - Acesso na rede: http://${iface.address}:${PORT}`);
             }
-        }
-        return addresses;
-    };
-
-    const networkIps = getNetworkAddresses();
-    console.log('\n---');
-    console.log('Acesse o sistema em um dos seguintes endereços:');
-    console.log(`  - No seu computador: http://localhost:${PORT}`);
-    if (networkIps.length > 0) {
-        networkIps.forEach(ip => {
-            console.log(`  - Em outros computadores na mesma rede: http://${ip}:${PORT}`);
         });
-    }
-    console.log(`  - URL Personalizada (requer configuração do arquivo 'hosts'): http://salas-de-reunioes-HDL:${PORT}`);
-    console.log('---\n');
+    });
+    console.log(`  - Acesso local: http://localhost:${PORT}`);
 });
 
-process.on('SIGINT', () => {
-  server.close(() => { db.close(); process.exit(0); });
-});
+process.on('SIGINT', () => server.close(() => { db.close(); process.exit(0); }));

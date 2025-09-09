@@ -51,6 +51,7 @@
     .state-message { text-align: center; padding: 40px; color: var(--text-muted); }
     .state-message i { font-size: 40px; margin-bottom: 15px; display: block; }
     .filtros-container { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 15px; align-items: end; margin-bottom: 20px; padding: 20px; background: var(--light-bg); border-radius: 10px; border: 1px solid var(--primary-color); }
+    .salas-filtros { display: flex; gap: 20px; max-width: 600px; margin-bottom: 20px; }
     .relatorio-container { background: var(--light-bg); border-radius: 10px; border: 1px solid var(--primary-color); padding: 20px; margin-top: 20px; min-height: 300px; overflow-x: auto; }
     .tabela-relatorio { width: 100%; border-collapse: collapse; font-size: 14px; }
     .tabela-relatorio th, .tabela-relatorio td { padding: 12px 15px; text-align: left; border-bottom: 1px solid var(--border-color); }
@@ -87,6 +88,9 @@
     .file-upload-label:hover { border-color: var(--primary-color); color: var(--primary-color); }
     .file-upload-label i { margin-right: 10px; }
     #fileNameDisplay, #ataFileNameDisplay { margin-top: 8px; font-size: 13px; color: var(--primary-color); text-align: center; }
+    #shareDepartments { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; background: var(--darker-bg); padding: 10px; border-radius: 6px; }
+    #shareDepartments label { display: flex; align-items: center; gap: 8px; font-weight: normal; color: var(--text-color); cursor: pointer; }
+    #shareDepartments input { width: auto; }
   </style>
 </head>
 <body>
@@ -119,8 +123,8 @@
     <div id="calendarioView" class="view"><div id="calendar"></div></div>
     
     <div id="salasView" class="view active">
-      <div class="filtros-container" style="grid-template-columns: 1fr; max-width: 300px; margin-bottom: 20px;">
-        <div class="form-group" style="margin: 0;">
+      <div class="salas-filtros">
+        <div class="form-group" style="margin: 0; flex-grow: 1;">
           <label for="statusFiltro">Filtrar por Status:</label>
           <select id="statusFiltro" onchange="loadMeetings()">
             <option value="">Todas</option>
@@ -128,6 +132,14 @@
             <option value="em_andamento">Em Andamento</option>
             <option value="concluida">Concluída</option>
             <option value="cancelada">Cancelada</option>
+          </select>
+        </div>
+        <!-- ✨ NOVO FILTRO DE VISUALIZAÇÃO PARA DEPARTAMENTOS ✨ -->
+        <div id="viewFiltroContainer" class="form-group" style="margin: 0; flex-grow: 1; display: none;">
+          <label for="viewFiltro">Visualizar:</label>
+          <select id="viewFiltro" onchange="loadMeetings()">
+            <option value="department">Minhas Reuniões e do Depto</option>
+            <option value="all">Todas as Reuniões</option>
           </select>
         </div>
       </div>
@@ -179,6 +191,10 @@
             <div id="fileNameDisplay"></div>
         </div>
         <div class="form-group"><label>Nomes dos Participantes</label><div id="participantesContainer" class="participantes-container"></div></div>
+        <div class="form-group">
+          <label>Compartilhar com:</label>
+          <div id="shareDepartments"></div>
+        </div>
         <div style="display: flex; gap: 10px; margin-top: 20px;">
           <button type="submit" class="btn btn-primary">Salvar</button>
           <button type="button" class="btn" style="background-color: #555; color: white;" onclick="closeMeetingModal()">Cancelar</button>
@@ -220,6 +236,8 @@
 <script>
     const api = axios.create({ baseURL: '/api' });
     let currentUser = null; let currentMeetingId = null; let calendar = null; let departments = [];
+    const departmentMap = new Map();
+    let allMeetingsCache = []; // ✨ CACHE PARA GUARDAR TODAS AS REUNIÕES ✨
     
     const statusConfig = {
       pendente: { label: 'Pendente', color: 'var(--primary-color)' },
@@ -257,9 +275,11 @@
         
         const canManage = currentUser.user_type === 'admin' || currentUser.user_type === 'department';
         const isAdmin = currentUser.user_type === 'admin';
+        const isDepartment = currentUser.user_type === 'department';
 
         document.getElementById('tabRelatorio').style.display = isAdmin ? 'block' : 'none';
         document.querySelectorAll('.btn-agendar').forEach(btn => btn.style.display = canManage ? 'block' : 'none');
+        document.getElementById('viewFiltroContainer').style.display = isDepartment ? 'block' : 'none';
 
         if (canManage) await loadDepartments();
         
@@ -308,6 +328,12 @@
             return;
           }
           let msg = `Assunto: ${props.subject}\nSala: ${props.room_location === 'baixo' ? 'Sala de Baixo' : 'Sala de Cima'}\nDepto: ${props.department}\nHorário: ${props.start_time} - ${props.end_time}\nOrganizador: ${props.organizer_name}\nParticipantes: ${props.participants_names || 'N/A'}`;
+          
+          if (props.shared_with && props.shared_with.length > 0) {
+            const sharedDeptNames = props.shared_with.map(deptId => departmentMap.get(deptId) || deptId).join(', ');
+            msg += `\nCompartilhado com: ${sharedDeptNames}`;
+          }
+
           if (props.file_path) { msg += `\n\nUm anexo está disponível para esta reunião.` }
           alert(msg);
         }
@@ -315,18 +341,37 @@
       calendar.render();
     }
 
+    // ✨ FUNÇÃO ATUALIZADA PARA USAR O CACHE E O NOVO FILTRO ✨
     async function loadMeetings() {
         try {
-            const statusFiltro = document.getElementById('statusFiltro').value;
-            const { data } = await api.get('/meetings', { params: { statusFiltro } });
-            renderMeetingsInContainer(document.getElementById('meetingsBaixo'), data.filter(m => m.room_location === 'baixo'));
-            renderMeetingsInContainer(document.getElementById('meetingsCima'), data.filter(m => m.room_location === 'cima'));
+            const { data } = await api.get('/meetings');
+            allMeetingsCache = data; // Guarda a lista completa no cache
+            applyFiltersAndRender(); // Aplica os filtros e renderiza
             if (calendar) calendar.refetchEvents();
         } catch (error) {
             console.error('Erro ao carregar reuniões:', error);
             const errorHtml = `<div class="state-message"><i class="fas fa-exclamation-triangle"></i><p>Falha ao carregar.</p></div>`;
             document.getElementById('meetingsBaixo').innerHTML = errorHtml; document.getElementById('meetingsCima').innerHTML = errorHtml;
         }
+    }
+    
+    // ✨ NOVA FUNÇÃO PARA APLICAR FILTROS SEM CHAMAR A API NOVAMENTE ✨
+    function applyFiltersAndRender() {
+        const statusFiltro = document.getElementById('statusFiltro').value;
+        const viewFiltro = document.getElementById('viewFiltro').value;
+
+        let meetingsToShow = [...allMeetingsCache];
+
+        if (statusFiltro) {
+            meetingsToShow = meetingsToShow.filter(m => m.computed_status === statusFiltro);
+        }
+
+        if (currentUser.user_type === 'department' && viewFiltro === 'department') {
+            meetingsToShow = meetingsToShow.filter(m => m.subject !== 'Reservado');
+        }
+        
+        renderMeetingsInContainer(document.getElementById('meetingsBaixo'), meetingsToShow.filter(m => m.room_location === 'baixo'));
+        renderMeetingsInContainer(document.getElementById('meetingsCima'), meetingsToShow.filter(m => m.room_location === 'cima'));
     }
 
     function renderMeetingsInContainer(container, meetings) {
@@ -363,6 +408,12 @@
             }
             
             const attachmentHtml = m.file_path ? `<li><i class="fas fa-paperclip fa-fw"></i> <a href="#" onclick="event.preventDefault(); downloadAttachment(${m.id})" class="attachment-link">Visualizar anexo</a></li>` : '';
+            
+            let sharedWithHtml = '';
+            if (!isReserved && m.shared_with && m.shared_with.length > 0) {
+              const sharedDeptNames = m.shared_with.map(deptId => departmentMap.get(deptId) || deptId).join(', ');
+              sharedWithHtml = `<li><i class="fas fa-share-alt fa-fw"></i> <strong>Compartilhado com:</strong> ${sharedDeptNames}</li>`;
+            }
 
             return `<div class="meeting-item" style="border-left-color: ${statusInfo.color};">
                 <div class="meeting-content">
@@ -373,6 +424,7 @@
                         <li><i class="fas fa-building fa-fw"></i> ${m.department}</li>
                         <li><i class="fas fa-user-tie fa-fw"></i> ${m.organizer_name}</li>
                         ${!isReserved ? `<li><i class="fas fa-users fa-fw"></i> ${m.participants_names || 'Não informado'} (${m.participants}p)</li>` : ''}
+                        ${sharedWithHtml}
                         ${attachmentHtml}
                     </ul>
                 </div>
@@ -383,49 +435,72 @@
         }).join('');
     }
 
-    async function openMeetingModal(room, meetingId = null) {
-      currentMeetingId = meetingId;
-      document.getElementById('meetingForm').reset();
-      document.getElementById('participantesContainer').innerHTML = '';
-      document.getElementById('meetingError').textContent = '';
-      displayFileName();
-      const deptSelect = document.getElementById('meetingDepartment');
-      deptSelect.disabled = currentUser.user_type === 'department';
-      if (currentUser.user_type === 'department') {
-          deptSelect.value = currentUser.username.split('_')[1];
+ async function openMeetingModal(room, meetingId = null) {
+  currentMeetingId = meetingId;
+  document.getElementById('meetingForm').reset();
+  document.getElementById('participantesContainer').innerHTML = '';
+  document.getElementById('meetingError').textContent = '';
+  displayFileName();
+  populateShareCheckboxes();
+
+  const deptSelect = document.getElementById('meetingDepartment');
+  deptSelect.disabled = currentUser.user_type === 'department';
+  if (currentUser.user_type === 'department') {
+      deptSelect.value = currentUser.username.split('_')[1];
+  }
+
+  try {
+    if (meetingId) {
+      // edição
+      document.getElementById('modalTitle').textContent = 'Editar Reunião';
+
+      const { data: m } = await api.get(`/meetings/${meetingId}`);
+      const { data: shares } = await api.get(`/meetings/${meetingId}/shares`);
+
+      // Preenche os campos
+      document.getElementById('meetingRoom').value = m.room_location;
+      document.getElementById('meetingDepartment').value = m.department;
+      document.getElementById('meetingDate').value = m.date;
+      document.getElementById('meetingStartTime').value = m.start_time;
+      document.getElementById('meetingEndTime').value = m.end_time;
+      document.getElementById('meetingSubject').value = m.subject;
+      document.getElementById('meetingParticipants').value = m.participants;
+
+      // Gera campos de participantes e preenche
+      gerarCamposParticipantes();
+      if (m.participants_names) {
+        m.participants_names.split(',').forEach((n, i) => {
+          const el = document.getElementById(`participante_${i + 1}`);
+          if (el) el.value = n.trim();
+        });
       }
-      try {
-        if (meetingId) {
-            document.getElementById('modalTitle').textContent = 'Editar Reunião';
-            const { data: m } = await api.get(`/meetings/${meetingId}`);
-            document.getElementById('meetingRoom').value = m.room_location;
-            document.getElementById('meetingDepartment').value = m.department;
-            document.getElementById('meetingDate').value = m.date;
-            document.getElementById('meetingStartTime').value = m.start_time;
-            document.getElementById('meetingEndTime').value = m.end_time;
-            document.getElementById('meetingSubject').value = m.subject;
-            document.getElementById('meetingParticipants').value = m.participants;
-            gerarCamposParticipantes();
-            if (m.participants_names) {
-                m.participants_names.split(',').forEach((n, i) => {
-                    const el = document.getElementById(`participante_${i+1}`);
-                    if (el) el.value = n.trim();
-                });
-            }
-            if (m.file_path) {
-                const fileName = m.file_path.split('-').slice(2).join('-');
-                displayFileName(fileName, true);
-            }
-        } else {
-            document.getElementById('modalTitle').textContent = 'Nova Reunião';
-            document.getElementById('meetingRoom').value = room;
-            document.getElementById('meetingDate').valueAsDate = new Date();
-        }
-        document.getElementById('meetingModal').style.display = 'block';
-      } catch(error) {
-        alert('Não foi possível carregar os dados da reunião.');
+
+      // Se tiver anexo, mostra o nome
+      if (m.file_path) {
+        const fileName = m.file_path.split('-').slice(2).join('-');
+        displayFileName(fileName, true);
       }
+
+      // Marca checkboxes de compartilhamento
+      shares.forEach(deptId => {
+        const checkbox = document.querySelector(`#shareDepartments input[value="${deptId}"]`);
+        if (checkbox) checkbox.checked = true;
+      });
+
+    } else {
+      // novo cadastro
+      document.getElementById('modalTitle').textContent = 'Nova Reunião';
+      document.getElementById('meetingRoom').value = room;
+      document.getElementById('meetingDate').valueAsDate = new Date();
     }
+
+    // Exibe modal
+    document.getElementById('meetingModal').style.display = 'block';
+
+  } catch (error) {
+    alert('Não foi possível carregar os dados da reunião.');
+  }
+}
 
     function closeMeetingModal() {
       document.getElementById('meetingModal').style.display = 'none';
@@ -440,6 +515,10 @@
           errDiv.textContent = 'O arquivo excede o limite de 20MB.';
           return;
       }
+      
+      const sharedCheckboxes = document.querySelectorAll('#shareDepartments input:checked');
+      const sharedDepartments = Array.from(sharedCheckboxes).map(cb => cb.value);
+
       const formData = new FormData();
       formData.append('room_location', document.getElementById('meetingRoom').value);
       formData.append('department', document.getElementById('meetingDepartment').value);
@@ -449,6 +528,8 @@
       formData.append('subject', document.getElementById('meetingSubject').value.trim());
       formData.append('participants', document.getElementById('meetingParticipants').value);
       formData.append('participants_names', Array.from({ length: parseInt(document.getElementById('meetingParticipants').value, 10) || 0 }, (_, i) => document.getElementById(`participante_${i + 1}`)?.value.trim()).join(', '));
+      formData.append('shared_departments', JSON.stringify(sharedDepartments));
+      
       if (file) {
           formData.append('attachment', file);
       }
@@ -460,7 +541,7 @@
           errDiv.textContent = 'O horário de término deve ser após o de início.';
           return;
       }
-      // ✨ VALIDAÇÃO DE HORÁRIO REMOVIDA DAQUI ✨
+      
       try {
         const method = currentMeetingId ? 'put' : 'post';
         const url = currentMeetingId ? `/meetings/${currentMeetingId}` : '/meetings';
@@ -500,10 +581,11 @@
             div.innerHTML = `<div class="state-message"><i class="fas fa-table"></i><p>Nenhuma reunião encontrada.</p></div>`;
             return;
         }
-        let html = `<p style="margin-bottom: 15px;">${meetings.length} reuniões encontradas.</p><table class="tabela-relatorio"><thead><tr><th>Data</th><th>Horário</th><th>Sala</th><th>Depto</th><th>Assunto</th><th>Organizador</th><th>Participantes</th><th>Status</th><th>Anexo</th></tr></thead><tbody>`;
+        let html = `<p style="margin-bottom: 15px;">${meetings.length} reuniões encontradas.</p><table class="tabela-relatorio"><thead><tr><th>Data</th><th>Horário</th><th>Sala</th><th>Depto</th><th>Assunto</th><th>Organizador</th><th>Participantes</th><th>Status</th><th>Anexo</th><th>Compartilhado com</th></tr></thead><tbody>`;
         meetings.forEach(m => { 
           const anexoHtml = m.file_path ? `<a href="#" onclick="event.preventDefault(); downloadAttachment(${m.id})" title="Visualizar anexo">📎</a>` : '-';
-          html += `<tr><td>${formatDate(m.date)}</td><td>${m.start_time} - ${m.end_time}</td><td>${m.room_location === 'baixo' ? 'S. Baixo' : 'S. Cima'}</td><td>${m.department}</td><td>${m.subject}</td><td>${m.organizer_name}</td><td>${m.participants_names||'-'}</td><td>${m.status_display}</td><td style="text-align:center;">${anexoHtml}</td></tr>`;
+          const sharedDeptNames = m.shared_with && m.shared_with.length > 0 ? m.shared_with.map(deptId => departmentMap.get(deptId) || deptId).join(', ') : '-';
+          html += `<tr><td>${formatDate(m.date)}</td><td>${m.start_time} - ${m.end_time}</td><td>${m.room_location === 'baixo' ? 'S. Baixo' : 'S. Cima'}</td><td>${m.department}</td><td>${m.subject}</td><td>${m.organizer_name}</td><td>${m.participants_names||'-'}</td><td>${m.status_display}</td><td style="text-align:center;">${anexoHtml}</td><td>${sharedDeptNames}</td></tr>`;
         });
         html += `</tbody></table>`;
         div.innerHTML = html;
@@ -549,6 +631,8 @@
       try {
         const { data: depts } = await api.get('/departments');
         departments = depts;
+        departmentMap.clear();
+        departments.forEach(d => departmentMap.set(d.id, d.name));
         const optionsHtml = depts.map(d => `<option value="${d.id}">${d.name}</option>`).join('');
         document.getElementById('meetingDepartment').innerHTML = '<option value="">Selecione...</option>' + optionsHtml;
         if (currentUser.user_type === 'admin') {
@@ -557,6 +641,25 @@
       } catch (error) {
         console.error('Erro ao carregar departamentos:', error);
       }
+    }
+    
+    function populateShareCheckboxes() {
+        const container = document.getElementById('shareDepartments');
+        container.innerHTML = '';
+        const currentUserDeptId = currentUser.user_type === 'department' ? currentUser.username.split('_')[1] : null;
+
+        departments.forEach(dept => {
+            if (dept.id !== currentUserDeptId) {
+                const label = document.createElement('label');
+                const checkbox = document.createElement('input');
+                checkbox.type = 'checkbox';
+                checkbox.value = dept.id;
+                checkbox.name = 'shared_departments';
+                label.appendChild(checkbox);
+                label.appendChild(document.createTextNode(` ${dept.name}`));
+                container.appendChild(label);
+            }
+        });
     }
 
     async function checkForUpcomingMeetings() {
