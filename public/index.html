@@ -323,7 +323,8 @@
         eventClick: (info) => {
           const props = info.event.extendedProps;
           if (props.subject === 'Reservado') {
-            const msg = `Horário Reservado - Entre ${props.start_time} e ${props.end_time}`;
+           const roomName = props.room_location === 'baixo' ? 'Sala de Baixo' : 'Sala de Cima';
+const msg = `Horário Reservado na ${roomName} - Entre ${props.start_time} e ${props.end_time}`;
             alert(msg);
             return;
           }
