@@ -59,9 +59,13 @@ const db = new sqlite3.Database('./meetings.db', (err) => {
 
 // --- Definição dos Departamentos ---
 const departmentsList = [
-    { id: 'pessoal', name: 'Departamento Pessoal' }, { id: 'legalizacao', name: 'Departamento Legalização' },
-    { id: 'contabil', name: 'Departamento Contábil' }, { id: 'financeiro', name: 'Departamento Financeiro' },
-    { id: 'fiscal', name: 'Departamento Fiscal' }, { id: 'rh', name: 'RH' }
+    { id: 'pessoal', name: 'Departamento Pessoal' }, 
+    { id: 'legalizacao', name: 'Departamento Legalização' },
+    { id: 'contabil', name: 'Departamento Contábil' }, 
+    { id: 'financeiro', name: 'Departamento Financeiro' },
+    { id: 'fiscal', name: 'Departamento Fiscal' }, 
+    { id: 'rh', name: 'RH' },
+    { id: 'diretoria', name: 'Diretoria' }
 ];
 const departmentMap = new Map(departmentsList.map(d => [d.id, d.name]));
 
@@ -77,7 +81,8 @@ db.serialize(() => {
       { username: 'departamento_legalizacao', password: 'legalizacao123', name: 'Departamento Legalização', user_type: 'department' },
       { username: 'departamento_contabil', password: 'contabil123', name: 'Departamento Contábil', user_type: 'department' },
       { username: 'departamento_financeiro', password: 'financeiro123', name: 'Departamento Financeiro', user_type: 'department' },
-      { username: 'departamento_fiscal', password: 'fiscal123', name: 'Departamento Fiscal', user_type: 'department' }
+      { username: 'departamento_fiscal', password: 'fiscal123', name: 'Departamento Fiscal', user_type: 'department' },
+      { username: 'diretoria', password: 'diretoria123', name: 'Diretoria', user_type: 'department' }
     ];
     const stmt = db.prepare(`INSERT OR IGNORE INTO users (username, password, name, user_type) VALUES (?, ?, ?, ?);`);
     users.forEach(user => {
@@ -193,12 +198,13 @@ app.get('/api/meetings', authenticateToken, (req, res) => {
             }
         }
         return {
-            ...meeting,
-            subject: 'Reservado',
-            organizer_name: 'Reservado',
-            participants_names: null,
-            department: 'Reservado',
-            file_path: null
+               ...meeting,
+    subject: 'Reservado',
+    organizer_name: 'Reservado',
+    participants_names: null,
+    // mantém o departamento visível:
+    department: departmentMap.get(meeting.department) || meeting.department,
+    file_path: null
         };
     });
     
@@ -437,14 +443,20 @@ app.get('/api/meetings/:id/attachment', authenticateToken, async (req, res) => {
                 req.user.id === meeting.organizer_id ||
                 (userDept && invitedDepts.includes(userDept));
 
-            if (hasPermission) {
-                const filePath = path.join(__dirname, meeting.file_path);
-                if (fs.existsSync(filePath)) {
-                    res.download(filePath);
-                } else {
-                    res.status(404).json({ error: 'Arquivo físico não encontrado.' });
-                }
-            } else {
+          // CÓDIGO CORRIGIDO
+if (hasPermission) {
+    const filePath = path.join(__dirname, meeting.file_path);
+    if (fs.existsSync(filePath)) {
+        // Extrai o nome original do arquivo a partir do caminho salvo no banco
+        const filenameOnDisk = path.basename(meeting.file_path);
+        const originalFilename = filenameOnDisk.split('-').slice(2).join('-');
+
+        // Envia o arquivo para download com o nome original correto
+        res.download(filePath, originalFilename.trim()); // Usamos .trim() por segurança
+    } else {
+        res.status(404).json({ error: 'Arquivo físico não encontrado.' });
+    }
+} else {
                 res.status(403).json({ error: 'Você não tem permissão para baixar este anexo.' });
             }
         });
